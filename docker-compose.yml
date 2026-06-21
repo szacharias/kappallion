@@ -35,3 +35,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: lakehouse-kafdrop
+    ports:
+      - "9010:9000"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:9092"
+      JVM_OPTS: "-Xms32M -Xmx64M"
+    depends_on:
+      kafka:
+        condition: service_healthy
