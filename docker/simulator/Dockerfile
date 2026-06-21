@@ -6,6 +6,6 @@ WORKDIR /app
 RUN pip install --no-cache-dir kafka-python-ng
 
 # Copy source code
-COPY simulator.py .
+COPY payload_simulator.py .
 
 CMD ["python", "payload_simulator.py"]
