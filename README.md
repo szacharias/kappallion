@@ -9,8 +9,8 @@ I choose the following technologies for this project:
 - Python: For streaming pipeline and simulator 3.11-slim
 - Docker: For containerization
 - Docker-compose: For orchestrating the services
-- Some sort of service to emulate a streaming data format. TBD
-- Data storage is also TBD. Considering between Delta Lake and Iceberg
+- Minio : to Emulate object storage
+- Delta Lake: Used as the data management solution 
 
 The project is structured as follows:
 - apps/: For Python code
