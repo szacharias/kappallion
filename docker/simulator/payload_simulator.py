@@ -5,6 +5,8 @@ import uuid
 import argparse
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from kafka import KafkaProducer
+import os
 
 class TruckSimulator:
     def __init__(self, vehicle_id, origin, destination, start_lat, start_lon):
@@ -117,8 +119,44 @@ if __name__ == "__main__":
         default=2.0,
         help="Every epoch time (seconds) that payload is generated"
     )
+    parser.add_argument(
+        "--use-kafka", 
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable or disable Kafka integration (use --no-use-kafka to disable)"
+    )
+    parser.add_argument(
+        "--kafka-bootstrap-servers", 
+        type=str, 
+        default=os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"),
+        help="Kafka bootstrap servers connection string"
+    )
+    parser.add_argument(
+        "--kafka-topic", 
+        type=str, 
+        default=os.environ.get("KAFKA_TOPIC", "cold-chain-telemetry"),
+        help="Kafka topic to send telemetry to"
+    )
     args = parser.parse_args() 
     
+    producer = None
+    if args.use_kafka:
+        # wait for kafka to be available 
+        print(f"Waiting for Kafka at {args.kafka_bootstrap_servers}...", flush=True)
+        for i in range(30):
+            try:
+                producer = KafkaProducer(
+                    bootstrap_servers=args.kafka_bootstrap_servers,
+                    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+                )
+                print("Connected to Kafka!", flush=True)
+                break
+            except Exception as e:
+                print(f"Waiting for Kafka ({i+1}/30)... Error: {e}", flush=True)
+                time.sleep(2)
+    else:
+        print("Not using Kafka, running simulator locally only")
+        
     # Baseline coordinates of the region
     base_lat = 41.8875294
     base_lon = -87.6513405
@@ -169,6 +207,8 @@ if __name__ == "__main__":
                 payload = truck.generate_payload()
                 print(json.dumps(payload, indent=2))
                 print("-" * 40)
+                if producer:
+                    producer.send(args.kafka_topic, value=payload)
             
             print(f"{'='*40}\nepoch : {epoch}\n{'='*40}")
             epoch += 1 # number of rounds is the number of times events are generated
