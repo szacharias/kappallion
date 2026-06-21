@@ -96,6 +96,8 @@ class TruckSimulator:
 
 # Execution Block for local verification
 if __name__ == "__main__":
+
+    # Defaults to running for 99999 seconds which is 1.157396 days 
     parser = argparse.ArgumentParser(description="Run the cold chain truck simulator.")
     parser.add_argument(
         "--num-trucks", 
