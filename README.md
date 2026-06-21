@@ -15,4 +15,4 @@ I choose the following technologies for this project:
 The project is structured as follows:
 - apps/: For Python code
 - docker/: For Dockerfiles
-- docker-compose.yml: For orchestrating the services 
+- docker-compose.yml: For orchestrating the 
