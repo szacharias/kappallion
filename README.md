@@ -6,7 +6,7 @@ Kappa is selected as it's a light weight streaming architecture that is easy to 
 I choose the following technologies for this project:
 - Kafka: For streaming data  
 - Spark: For data processing
-- Python: For streaming pipeline and simulator
+- Python: For streaming pipeline and simulator 3.11-slim
 - Docker: For containerization
 - Docker-compose: For orchestrating the services
 - Some sort of service to emulate a streaming data format. TBD
@@ -15,4 +15,9 @@ I choose the following technologies for this project:
 The project is structured as follows:
 - apps/: For Python code
 - docker/: For Dockerfiles
-- docker-compose.yml: For orchestrating the services 
+- docker-compose.yml: For orchestrating the 
+
+Sample datasets included in git for reference: 
+- [dataset-sample/Fruit Spoilage Prediction in an IoT Enabled Cold Storage System Dataset.csv](dataset-sample/Fruit%20Spoliage%20Prediction%20in%20an%20IoT%20Enabled%20Cold%20Storage%20System%20Dataset.csv)
+- [dataset-sample/smart-logistics-supply-chain-dataset/delivery_status.csv](dataset-sample/smart-logistics-supply-chain-dataset/delivery_status.csv)
+
