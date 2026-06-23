@@ -1,19 +1,14 @@
-services:
-  telemetry-simulator:
-    build:
-      context: ./docker/simulator
-    container_name: coldchain-data-emulator
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - KAFKA_TOPIC=cold-chain-telemetry
-    depends_on:
-      kafka:
-        condition: service_healthy
+version: "3.8"
 
+services:
+
+
+#  phase 1: kafka, kafdrop, minio
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: lakehouse-kafka
     ports:
+      - "9092:9092"
       - "29092:29092"
     environment:
       KAFKA_NODE_ID: 1
@@ -63,4 +58,87 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-      # not doing volumes. i want a clean run everytime and storing the data here doesnt make too much sense
+# phase 2, minio init for buckets and policies
+  minio-init:
+    image: minio/mc:latest
+    container_name: lakehouse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 admin password;
+      /usr/bin/mc mb -p myminio/warehouse;
+      /usr/bin/mc mb -p myminio/lakehouse;
+      /usr/bin/mc policy set public myminio/warehouse;
+      /usr/bin/mc policy set public myminio/lakehouse;
+      exit 0;
+      "
+    # add a warehouse location for catching defaults that i might've missed 
+  
+
+#  phase 3: spark streaming pipeline and telemetry simulator
+  spark-delta:
+    build:
+      context: ./docker/spark
+    container_name: lakehouse-spark-delta
+    environment:
+      - SPARK_MODE=master
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - ./apps:/opt/spark/apps
+      - ./config:/opt/spark/config
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+    # Run the streaming pipeline (keep alive on failure)
+    command: >
+      /bin/bash -c "
+      echo 'Starting PySpark streaming pipeline...' &&
+      ( /opt/spark/bin/spark-submit --master local[*] /opt/spark/apps/streaming_pipeline.py || tail -f /dev/null )
+      "
+    depends_on:
+      kafka:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [ "CMD-SHELL", "pgrep -f streaming_pipeline.py" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  telemetry-simulator:
+    build:
+      context: ./docker/simulator
+    container_name: lakehouse-simulator
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC=cold-chain-telemetry
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+
+#  phase 4: streamlit dashboard
+#  
+  dashboard:
+    build:
+      context: ./docker/dashboard
+    container_name: lakehouse-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=password
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - SPARK_HOME=/opt/spark
+      - PYTHONPATH=/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
+    volumes:
+      - ./apps:/app/apps
+      - ./config:/app/config
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+    depends_on:
+      spark-delta:
+        condition: service_healthy
