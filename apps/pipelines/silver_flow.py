@@ -14,6 +14,12 @@ def start_silver_stream(spark, lakehouse):
         StructField("eventId", StringType(), True),
         StructField("vehicleId", StringType(), True),
         StructField("timestamp", StringType(), True),
+        StructField("routeContext", StructType([
+            StructField("latitude", DoubleType(), True),
+            StructField("longitude", DoubleType(), True),
+            StructField("origin", StringType(), True),
+            StructField("destination", StringType(), True)
+        ]), True),
         StructField("telemetry", StructType([
             StructField("ambientTempC", DoubleType(), True),
             StructField("cargoContainerTempC", DoubleType(), True),
@@ -34,12 +40,18 @@ def start_silver_stream(spark, lakehouse):
             f.col("data.telemetry.cargoContainerTempC").alias("Cargo_Temp"),
             f.col("data.telemetry.relativeHumidityPct").alias("Humidity"),
             f.col("data.telemetry.vibrationG").alias("Vibration"),
-            f.col("data.telemetry.doorStatus").alias("Door_Status")
+            f.col("data.telemetry.doorStatus").alias("Door_Status"),
+            f.col("data.routeContext.latitude").alias("Latitude"),
+            f.col("data.routeContext.longitude").alias("Longitude")
         ) \
         .filter(f.col("Vehicle_ID").isNotNull() & f.col("Timestamp").isNotNull()) \
         .withWatermark("Timestamp", "10 seconds") \
         .dropDuplicates(["Vehicle_ID", "Timestamp"]) \
-        .withColumn("Temp_Delta", f.round(f.col("Cargo_Temp") - f.col("Ambient_Temp"), 2))
+        .withColumn("Temp_Delta", f.round(f.col("Cargo_Temp") - f.col("Ambient_Temp"), 2)) \
+        .withColumn("gamma", (17.27 * f.col("Cargo_Temp")) / (237.7 + f.col("Cargo_Temp")) + f.log(f.col("Humidity") / 100.0)) \
+        .withColumn("Dew_Point", f.round((237.7 * f.col("gamma")) / (17.27 - f.col("gamma")), 2)) \
+        .withColumn("Condensation_Risk", (f.col("Cargo_Temp") - f.col("Dew_Point")) < 2.0) \
+        .drop("gamma")
 
     # Write cleaned and enriched events to Silver table path
     return parsed_silver_df.writeStream \
