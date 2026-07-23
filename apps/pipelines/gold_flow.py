@@ -20,7 +20,9 @@ def start_gold_stream(spark, lakehouse):
             f.round(f.avg("Cargo_Temp"), 2).alias("Avg_Cargo_Temp"),
             f.round(f.avg("Ambient_Temp"), 2).alias("Avg_Ambient_Temp"),
             f.round(f.max("Vibration"), 2).alias("Max_Vibration"),
-            f.sum(f.when(f.col("Door_Status") == "OPEN", 1).otherwise(0)).alias("Door_Open_Count")
+            f.sum(f.when(f.col("Door_Status") == "OPEN", 1).otherwise(0)).alias("Door_Open_Count"),
+            f.round(f.avg("Dew_Point"), 2).alias("Avg_Dew_Point"),
+            f.sum(f.when(f.col("Condensation_Risk") == True, 1).otherwise(0)).alias("Condensation_Risk_Count")
         ) \
         .withColumn("Window_Start", f.col("window.start")) \
         .withColumn("Window_End", f.col("window.end")) \
@@ -28,7 +30,7 @@ def start_gold_stream(spark, lakehouse):
             "Anomaly_Flag",
             (f.col("Avg_Cargo_Temp") > 8.0) | (f.col("Door_Open_Count") > 0) | (f.col("Max_Vibration") > 3.0)
         ) \
-        .select("Window_Start", "Window_End", "Vehicle_ID", "Avg_Cargo_Temp", "Avg_Ambient_Temp", "Max_Vibration", "Door_Open_Count", "Anomaly_Flag")
+        .select("Window_Start", "Window_End", "Vehicle_ID", "Avg_Cargo_Temp", "Avg_Ambient_Temp", "Max_Vibration", "Door_Open_Count", "Anomaly_Flag", "Avg_Dew_Point", "Condensation_Risk_Count")
 
     return gold_agg_df.writeStream \
         .format("delta") \
