@@ -98,7 +98,8 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TOPIC=cold-chain-telemetry
     volumes:
-      - ./docker/simulator/payload_simulator.py:/app/payload_simulator.py
+      - ./docker/simulator:/app
+      - ./docker/dashboard:/dashboard
       - ./config:/app/config
       - ./tests:/app/tests
       - ./pyproject.toml:/app/pyproject.toml
@@ -123,7 +124,7 @@ services:
       - AWS_REGION=us-east-1
       - AWS_DEFAULT_REGION=us-east-1
       - SPARK_HOME=/opt/spark
-      - PYTHONPATH=/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
+      - PYTHONPATH=/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip:/app
       - _JAVA_OPTIONS=-Xms256m -Xmx512m
     deploy:
       resources:
@@ -133,7 +134,7 @@ services:
       - ./apps:/app/apps
       - ./config:/app/config
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
-      - ./docker/dashboard/app.py:/app/app.py
+      - ./docker/dashboard:/app
     depends_on:
       spark-delta:
         condition: service_healthy
