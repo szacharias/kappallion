@@ -3,6 +3,7 @@ import json
 import random
 import uuid
 import argparse
+import math
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from kafka import KafkaProducer
@@ -19,7 +20,9 @@ class TruckSimulator:
         self.dest_lon = dest_lon
         self.base_lat = start_lat
         self.base_lon = start_lon
-        self.speed_factor = random.uniform(0.005, 0.009)  # Significantly larger travel distance per tick
+        self.speed_factor = random.uniform(0.005, 0.009)  # Substantial travel distance per tick
+        # Compute initial heading toward destination
+        self.heading = math.atan2(self.dest_lat - self.lat, self.dest_lon - self.lon)
         
         # Physical baselines
         self.ambient_temp = 25.0  # Summer ambient temp C
@@ -38,18 +41,30 @@ class TruckSimulator:
         # 1. Simulate micro-fluctuations in ambient temperature
         self.ambient_temp += random.normalvariate(0, 0.1)
         
-        # 2. Progress coordinates toward destination with larger travel distance
+        # 2. Progress coordinates toward destination with +/- 45 deg organic random variation
         d_lat = self.dest_lat - self.lat
         d_lon = self.dest_lon - self.lon
-        dist = (d_lat**2 + d_lon**2)**0.5
-        if dist > 0.005:
-            # Move visibly along the route towards destination
-            self.lat += (d_lat / dist) * self.speed_factor + random.uniform(-0.0003, 0.0003)
-            self.lon += (d_lon / dist) * self.speed_factor + random.uniform(-0.0003, 0.0003)
+        dist = math.sqrt(d_lat**2 + d_lon**2)
+        if dist > 0.008:
+            # Target heading angle directly to destination
+            target_heading = math.atan2(d_lat, d_lon)
+            # Angular difference normalized to [-pi, pi]
+            diff = (target_heading - self.heading + math.pi) % (2 * math.pi) - math.pi
+            
+            # Random turn between -45 deg (-pi/4) and +45 deg (+pi/4) from previous direction
+            rand_turn = random.uniform(-math.pi / 4, math.pi / 4)
+            
+            # Blend: 65% previous momentum + random turn (+-45 deg), 35% steering pull toward destination
+            self.heading = self.heading + (rand_turn * 0.65) + (diff * 0.35)
+            
+            # Advance coordinates along current heading
+            self.lat += math.sin(self.heading) * self.speed_factor
+            self.lon += math.cos(self.heading) * self.speed_factor
         else:
             # Turn around and return to base or reverse route
             self.dest_lat, self.base_lat = self.base_lat, self.dest_lat
             self.dest_lon, self.base_lon = self.base_lon, self.dest_lon
+            self.heading = math.atan2(self.dest_lat - self.lat, self.dest_lon - self.lon)
         
         # 3. Handle state mechanics and thermodynamic decay
         if self.state == "NORMAL":
