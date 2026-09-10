@@ -9,20 +9,51 @@ from zoneinfo import ZoneInfo
 from kafka import KafkaProducer
 import os
 
+def load_routes():
+    route_paths = [
+        os.environ.get("ROUTES_FILE", "/app/config/routes.json"),
+        "/app/routes.json",
+        "config/routes.json",
+        "docker/simulator/routes.json"
+    ]
+    for rp in route_paths:
+        if os.path.exists(rp):
+            try:
+                with open(rp, "r") as f:
+                    data = json.load(f)
+                    if data:
+                        return data
+            except Exception as e:
+                print(f"Failed to read routes from {rp}: {e}", flush=True)
+    return {}
+
 class TruckSimulator:
-    def __init__(self, vehicle_id, origin, destination, start_lat, start_lon, dest_lat, dest_lon):
+    def __init__(self, vehicle_id, origin, destination, start_lat, start_lon, dest_lat, dest_lon, waypoints=None, start_offset=0):
         self.vehicle_id = vehicle_id
         self.origin = origin
         self.destination = destination
-        self.lat = start_lat
-        self.lon = start_lon
         self.dest_lat = dest_lat
         self.dest_lon = dest_lon
         self.base_lat = start_lat
         self.base_lon = start_lon
-        self.speed_factor = random.uniform(0.005, 0.009)  # Substantial travel distance per tick
-        # Compute initial heading toward destination
-        self.heading = math.atan2(self.dest_lat - self.lat, self.dest_lon - self.lon)
+        
+        # Real road waypoints if provided
+        if waypoints and len(waypoints) > 1:
+            self.waypoints = waypoints
+            self.waypoint_idx = min(start_offset, len(waypoints) - 1)
+            self.direction = 1  # 1 = outbound to hub, -1 = return to base
+            self.step_size = random.randint(3, 6)  # Advance along road polyline
+            pt = self.waypoints[self.waypoint_idx]
+            self.lat = pt[0]
+            self.lon = pt[1]
+            self.use_roads = True
+        else:
+            self.waypoints = None
+            self.use_roads = False
+            self.lat = start_lat
+            self.lon = start_lon
+            self.speed_factor = random.uniform(0.005, 0.009)
+            self.heading = math.atan2(self.dest_lat - self.lat, self.dest_lon - self.lon)
         
         # Physical baselines
         self.ambient_temp = 25.0  # Summer ambient temp C
@@ -41,30 +72,36 @@ class TruckSimulator:
         # 1. Simulate micro-fluctuations in ambient temperature
         self.ambient_temp += random.normalvariate(0, 0.1)
         
-        # 2. Progress coordinates toward destination with +/- 45 deg organic random variation
-        d_lat = self.dest_lat - self.lat
-        d_lon = self.dest_lon - self.lon
-        dist = math.sqrt(d_lat**2 + d_lon**2)
-        if dist > 0.008:
-            # Target heading angle directly to destination
-            target_heading = math.atan2(d_lat, d_lon)
-            # Angular difference normalized to [-pi, pi]
-            diff = (target_heading - self.heading + math.pi) % (2 * math.pi) - math.pi
+        # 2. Progress coordinates along real roads or synthetic vector
+        if self.use_roads and self.waypoints:
+            self.waypoint_idx += self.direction * self.step_size
+            if self.waypoint_idx >= len(self.waypoints) - 1:
+                self.waypoint_idx = len(self.waypoints) - 1
+                self.direction = -1  # Turn around at the hub, head back to base
+            elif self.waypoint_idx <= 0:
+                self.waypoint_idx = 0
+                self.direction = 1   # Turn around at base, head back out
             
-            # Random turn between -45 deg (-pi/4) and +45 deg (+pi/4) from previous direction
-            rand_turn = random.uniform(-math.pi / 4, math.pi / 4)
-            
-            # Blend: 65% previous momentum + random turn (+-45 deg), 35% steering pull toward destination
-            self.heading = self.heading + (rand_turn * 0.65) + (diff * 0.35)
-            
-            # Advance coordinates along current heading
-            self.lat += math.sin(self.heading) * self.speed_factor
-            self.lon += math.cos(self.heading) * self.speed_factor
+            # Snap to real road waypoint with +/- ~5m multi-lane choice offset
+            base_pt = self.waypoints[self.waypoint_idx]
+            self.lat = base_pt[0] + random.uniform(-0.00006, 0.00006)
+            self.lon = base_pt[1] + random.uniform(-0.00006, 0.00006)
         else:
-            # Turn around and return to base or reverse route
-            self.dest_lat, self.base_lat = self.base_lat, self.dest_lat
-            self.dest_lon, self.base_lon = self.base_lon, self.dest_lon
-            self.heading = math.atan2(self.dest_lat - self.lat, self.dest_lon - self.lon)
+            # Fallback to heading / angle movement with +/- 45 deg organic random variation
+            d_lat = self.dest_lat - self.lat
+            d_lon = self.dest_lon - self.lon
+            dist = math.sqrt(d_lat**2 + d_lon**2)
+            if dist > 0.008:
+                target_heading = math.atan2(d_lat, d_lon)
+                diff = (target_heading - self.heading + math.pi) % (2 * math.pi) - math.pi
+                rand_turn = random.uniform(-math.pi / 4, math.pi / 4)
+                self.heading = self.heading + (rand_turn * 0.65) + (diff * 0.35)
+                self.lat += math.sin(self.heading) * self.speed_factor
+                self.lon += math.cos(self.heading) * self.speed_factor
+            else:
+                self.dest_lat, self.base_lat = self.base_lat, self.dest_lat
+                self.dest_lon, self.base_lon = self.base_lon, self.dest_lon
+                self.heading = math.atan2(self.dest_lat - self.lat, self.dest_lon - self.lon)
         
         # 3. Handle state mechanics and thermodynamic decay
         if self.state == "NORMAL":
@@ -217,6 +254,13 @@ if __name__ == "__main__":
         "Hub-Bolingbrook": (41.6986, -88.0684)
     }
 
+    # Load real road network waypoints from OpenStreetMap
+    routes_data = load_routes()
+    if routes_data:
+        print(f"🗺️ Successfully loaded real road routes for {len(routes_data)} hubs from OpenStreetMap OSRM!", flush=True)
+    else:
+        print("⚠️ No road routes found in config/routes.json, using vector trajectory fallback.", flush=True)
+
     # Predictable, consistent vehicle IDs and distinct destination routes
     hub_choices = list(chicagoland_hubs.keys())
     target_trucks = get_target_fleet_size(args.num_trucks)
@@ -225,7 +269,11 @@ if __name__ == "__main__":
         origin = "Base Warehouse"
         dest = hub_choices[i % len(hub_choices)]
         dest_lat, dest_lon = chicagoland_hubs[dest]
-        fleet.append(TruckSimulator(v_id, origin, dest, base_lat, base_lon, dest_lat, dest_lon))
+        route_info = routes_data.get(dest, {})
+        pts = route_info.get("waypoints", [])
+        # Stagger initial positions along the road network so trucks are naturally distributed
+        stagger = int((i * 45) % max(1, len(pts) - 20)) if pts else 0
+        fleet.append(TruckSimulator(v_id, origin, dest, base_lat, base_lon, dest_lat, dest_lon, waypoints=pts, start_offset=stagger))
     
     print(f"Simulator Started simulating {len(fleet)} trucks ({', '.join([t.vehicle_id for t in fleet])}). Press Ctrl+C to stop.\n")
     print(f"total time scheduled {args.total_time}s, time per epoch {args.time_per_epoch}s, and total rounds is {args.total_time/args.time_per_epoch}")
@@ -244,8 +292,11 @@ if __name__ == "__main__":
                 new_vid = f"TRK-CHI-{new_idx+1:04d}"
                 new_dest = hub_choices[new_idx % len(hub_choices)]
                 n_dest_lat, n_dest_lon = chicagoland_hubs[new_dest]
-                fleet.append(TruckSimulator(new_vid, origin, new_dest, base_lat, base_lon, n_dest_lat, n_dest_lon))
-                print(f"🚨 Dynamically added truck to active fleet: {new_vid} (Route: {new_dest})", flush=True)
+                route_info = routes_data.get(new_dest, {})
+                pts = route_info.get("waypoints", [])
+                stagger = int((new_idx * 45) % max(1, len(pts) - 20)) if pts else 0
+                fleet.append(TruckSimulator(new_vid, origin, new_dest, base_lat, base_lon, n_dest_lat, n_dest_lon, waypoints=pts, start_offset=stagger))
+                print(f"🚨 Dynamically added truck to active fleet: {new_vid} (Route: {new_dest}, Road Waypoints: {len(pts)})", flush=True)
 
             for truck in fleet:
                 payload = truck.generate_payload()
