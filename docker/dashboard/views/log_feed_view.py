@@ -5,7 +5,7 @@ Presentation component rendering the ingestion heartbeat and layer logs feed.
 
 import pandas as pd
 import streamlit as st
-from services.lakehouse_service import fetch_bronze_df, fetch_delta_history
+from services.lakehouse_service import fetch_delta_history
 
 
 def render_ingestion_heartbeat(stats: dict):
@@ -32,15 +32,20 @@ def render_ingestion_heartbeat(stats: dict):
     )
 
 
-def render_layer_logs_feed(spark, lakehouse_env, silver_df: pd.DataFrame, gold_df: pd.DataFrame):
+def render_layer_logs_feed(
+    spark,
+    lakehouse_env,
+    bronze_df: pd.DataFrame,
+    silver_df: pd.DataFrame,
+    gold_df: pd.DataFrame,
+):
     """Render expandable raw Kafka, Silver cleaned, Gold aggregated, and commit history logs."""
     st.sidebar.markdown("---")
     st.sidebar.subheader("📋 Layer Logs Feed")
 
     with st.sidebar.expander("🟢 Bronze Kafka Logs", expanded=False):
-        bronze_records = fetch_bronze_df(spark, lakehouse_env.path_bronze)
-        if not bronze_records.empty:
-            for _, b_row in bronze_records.head(5).iterrows():
+        if not bronze_df.empty:
+            for _, b_row in bronze_df.head(5).iterrows():
                 st.code(f"[{b_row['timestamp']}] Offset {b_row['offset']}\n{b_row['payload'][:110]}...", language="json")
         else:
             st.info("No Bronze logs available yet.")
@@ -61,9 +66,17 @@ def render_layer_logs_feed(spark, lakehouse_env, silver_df: pd.DataFrame, gold_d
 
     with st.sidebar.expander("📜 Delta Commit History", expanded=False):
         layer_sel = st.selectbox("Select Layer", ["Bronze", "Silver", "Gold"], key="hist_layer_sel")
-        layer_path = lakehouse_env.path_bronze if layer_sel == "Bronze" else (lakehouse_env.path_silver if layer_sel == "Silver" else lakehouse_env.path_gold)
-        hist_df = fetch_delta_history(spark, layer_path)
-        if not hist_df.empty:
-            st.dataframe(hist_df, hide_index=True, use_container_width=True)
+        load_history = st.checkbox("Load commit log from Delta", value=False, key="chk_load_history")
+        if load_history:
+            layer_path = (
+                lakehouse_env.path_bronze
+                if layer_sel == "Bronze"
+                else (lakehouse_env.path_silver if layer_sel == "Silver" else lakehouse_env.path_gold)
+            )
+            hist_df = fetch_delta_history(spark, layer_path)
+            if not hist_df.empty:
+                st.dataframe(hist_df, hide_index=True, use_container_width=True)
+            else:
+                st.info("No commit history.")
         else:
-            st.info("No commit history.")
+            st.caption("Check the box above to inspect ACID commit log on demand.")

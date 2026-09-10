@@ -13,11 +13,11 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from services.lakehouse_service import (
+    compute_stream_stats,
+    fetch_bronze_df,
     fetch_gold_df,
     fetch_silver_df,
-    fetch_stream_stats,
     init_spark_session,
-    register_delta_views,
 )
 from views.fleet_view import render_fleet_manager
 from views.kpi_view import render_fleet_kpis
@@ -38,7 +38,6 @@ inject_custom_styles()
 try:
     lakehouse = init_spark_session()
     spark = lakehouse.spark
-    register_delta_views(spark, lakehouse)
     spark_connected = True
 except Exception as e:
     st.error(f"Failed to connect to Spark: {e}")
@@ -57,19 +56,19 @@ st.sidebar.caption("💡 Page is static by default to conserve memory & CPU. Cli
 
 if st.sidebar.button("🔄 Refresh Data Now", type="primary", use_container_width=True):
     st.cache_data.clear()
-    register_delta_views(spark, lakehouse)
     st.rerun()
 
 st.sidebar.caption(f"Last fetched: `{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`")
 
-# 4. Data Loading (Cached)
-stats = fetch_stream_stats(spark, lakehouse.path_bronze, lakehouse.path_silver, lakehouse.path_gold)
+# 4. Data Loading (Cached Bounded Queries)
 silver_df = fetch_silver_df(spark, lakehouse.path_silver)
 gold_df = fetch_gold_df(spark, lakehouse.path_gold)
+bronze_df = fetch_bronze_df(spark, lakehouse.path_bronze, limit=10)
+stats = compute_stream_stats(bronze_df, silver_df, gold_df)
 
 # 5. Sidebar Views
 render_ingestion_heartbeat(stats)
-render_layer_logs_feed(spark, lakehouse, silver_df, gold_df)
+render_layer_logs_feed(spark, lakehouse, bronze_df, silver_df, gold_df)
 render_fleet_manager()
 
 # 6. Main Canvas Views
