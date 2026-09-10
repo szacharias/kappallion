@@ -128,6 +128,7 @@ services:
       - ./apps:/app/apps
       - ./config:/app/config
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./docker/dashboard/app.py:/app/app.py
     depends_on:
       spark-delta:
         condition: service_healthy

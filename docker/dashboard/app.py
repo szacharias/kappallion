@@ -74,7 +74,11 @@ except Exception as e:
 st.sidebar.title("❄️ Cold-Chain Lakehouse")
 st.sidebar.markdown("This dashboard queries the **Gold** and **Silver** tables in the Delta Lake on MinIO.")
 
-auto_refresh = st.sidebar.checkbox("Auto Refresh Data", value=False)
+# Guarantee auto-refresh starts turned OFF
+if "auto_refresh_enabled" not in st.session_state:
+    st.session_state.auto_refresh_enabled = False
+
+auto_refresh = st.sidebar.checkbox("Auto Refresh Data", value=st.session_state.auto_refresh_enabled, key="auto_refresh_enabled")
 refresh_rate = st.sidebar.slider("Refresh Interval (seconds)", min_value=3, max_value=60, value=10, disabled=not auto_refresh)
 st.sidebar.caption("💡 Page is static by default to conserve memory & CPU. Click Refresh to fetch latest records.")
 
@@ -95,6 +99,45 @@ if not spark_connected:
 
 # Cached data loaders
 @st.cache_data(ttl=60)
+def fetch_stream_stats(_spark, path_bronze, path_silver, path_gold):
+    stats = {}
+    try:
+        b_df = _spark.sql(f"SELECT count(*) as total, max(timestamp) as latest_ts, max(offset) as latest_offset FROM delta.`{path_bronze}`").toPandas()
+        stats["bronze_count"] = int(b_df["total"].iloc[0]) if not b_df.empty and pd.notna(b_df["total"].iloc[0]) else 0
+        stats["bronze_latest"] = str(b_df["latest_ts"].iloc[0]) if not b_df.empty and pd.notna(b_df["latest_ts"].iloc[0]) else "N/A"
+        stats["bronze_offset"] = int(b_df["latest_offset"].iloc[0]) if not b_df.empty and pd.notna(b_df["latest_offset"].iloc[0]) else 0
+    except Exception:
+        stats["bronze_count"] = 0
+        stats["bronze_latest"] = "N/A"
+        stats["bronze_offset"] = 0
+
+    try:
+        s_df = _spark.sql(f"SELECT count(*) as total, max(Timestamp) as latest_ts FROM delta.`{path_silver}`").toPandas()
+        stats["silver_count"] = int(s_df["total"].iloc[0]) if not s_df.empty and pd.notna(s_df["total"].iloc[0]) else 0
+        stats["silver_latest"] = str(s_df["latest_ts"].iloc[0]) if not s_df.empty and pd.notna(s_df["latest_ts"].iloc[0]) else "N/A"
+    except Exception:
+        stats["silver_count"] = 0
+        stats["silver_latest"] = "N/A"
+
+    try:
+        g_df = _spark.sql(f"SELECT count(*) as total, max(Window_End) as latest_ts FROM delta.`{path_gold}`").toPandas()
+        stats["gold_count"] = int(g_df["total"].iloc[0]) if not g_df.empty and pd.notna(g_df["total"].iloc[0]) else 0
+        stats["gold_latest"] = str(g_df["latest_ts"].iloc[0]) if not g_df.empty and pd.notna(g_df["latest_ts"].iloc[0]) else "N/A"
+    except Exception:
+        stats["gold_count"] = 0
+        stats["gold_latest"] = "N/A"
+
+    return stats
+
+@st.cache_data(ttl=60)
+def fetch_bronze_df(_spark, path):
+    try:
+        return _spark.sql(f"SELECT timestamp, partition, offset, substring(CAST(value AS STRING), 1, 150) as payload FROM delta.`{path}` ORDER BY timestamp DESC LIMIT 20").toPandas()
+    except Exception as ex:
+        print(f"Bronze table fetch error: {ex}", flush=True)
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
 def fetch_silver_df(_spark, path):
     try:
         return _spark.sql(f"SELECT * FROM delta.`{path}` ORDER BY Timestamp DESC LIMIT 500").toPandas()
@@ -108,6 +151,13 @@ def fetch_gold_df(_spark, path):
         return _spark.sql(f"SELECT * FROM delta.`{path}` ORDER BY Window_End DESC LIMIT 100").toPandas()
     except Exception as ex:
         print(f"Gold table fetch error: {ex}", flush=True)
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def fetch_delta_history(_spark, path):
+    try:
+        return _spark.sql(f"DESCRIBE HISTORY delta.`{path}` LIMIT 10").select("version", "timestamp", "operation").toPandas()
+    except Exception as ex:
         return pd.DataFrame()
 
 # Main UI Header
@@ -124,15 +174,72 @@ with header_col2:
             pass
         st.rerun()
 
+# Fetch latest status using direct delta path queries
+stats = fetch_stream_stats(spark, lakehouse.path_bronze, lakehouse.path_silver, lakehouse.path_gold)
+silver_df = fetch_silver_df(spark, lakehouse.path_silver)
+gold_df = fetch_gold_df(spark, lakehouse.path_gold)
+
+# Sidebar Ingestion Heartbeat & Logs Feed
+st.sidebar.markdown("---")
+st.sidebar.subheader("📡 Ingestion Heartbeat")
+
+st.sidebar.markdown(
+    f"**🟢 Bronze (Kafka Raw)**\n\n"
+    f"Events: **{stats['bronze_count']:,}** | Offset: `{stats['bronze_offset']}`\n\n"
+    f"Latest: `{stats['bronze_latest']}`"
+)
+
+st.sidebar.markdown(
+    f"**🔵 Silver (Cleaned IoT)**\n\n"
+    f"Records: **{stats['silver_count']:,}**\n\n"
+    f"Latest: `{stats['silver_latest']}`"
+)
+
+st.sidebar.markdown(
+    f"**🟡 Gold (Aggregated Windows)**\n\n"
+    f"Windows: **{stats['gold_count']:,}**\n\n"
+    f"Latest: `{stats['gold_latest']}`"
+)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📋 Layer Logs Feed")
+
+with st.sidebar.expander("🟢 Bronze Kafka Logs", expanded=False):
+    bronze_records = fetch_bronze_df(spark, lakehouse.path_bronze)
+    if not bronze_records.empty:
+        for _, b_row in bronze_records.head(5).iterrows():
+            st.code(f"[{b_row['timestamp']}] Offset {b_row['offset']}\n{b_row['payload'][:110]}...", language="json")
+    else:
+        st.info("No Bronze logs available yet.")
+
+with st.sidebar.expander("🔵 Silver Cleaned Logs", expanded=False):
+    if not silver_df.empty:
+        for _, s_row in silver_df.head(5).iterrows():
+            st.caption(f"**{s_row['Vehicle_ID']}** @ `{s_row['Timestamp']}`\n* Cargo: `{s_row['Cargo_Temp']}°C` | Door: `{s_row['Door_Status']}` | Δ: `{s_row['Temp_Delta']}°C`")
+    else:
+        st.info("No Silver logs available yet.")
+
+with st.sidebar.expander("🟡 Gold Window Logs", expanded=False):
+    if not gold_df.empty:
+        for _, g_row in gold_df.head(5).iterrows():
+            st.caption(f"**{g_row['Vehicle_ID']}** [{str(g_row['Window_Start'])[-8:]} - {str(g_row['Window_End'])[-8:]}]\n* Avg Cargo: `{g_row['Avg_Cargo_Temp']}°C` | Anomaly: `{g_row['Anomaly_Flag']}`")
+    else:
+        st.info("No Gold logs available yet.")
+
+with st.sidebar.expander("📜 Delta Commit History", expanded=False):
+    layer_sel = st.selectbox("Select Layer", ["Bronze", "Silver", "Gold"], key="hist_layer_sel")
+    layer_path = lakehouse.path_bronze if layer_sel == "Bronze" else (lakehouse.path_silver if layer_sel == "Silver" else lakehouse.path_gold)
+    hist_df = fetch_delta_history(spark, layer_path)
+    if not hist_df.empty:
+        st.dataframe(hist_df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No commit history.")
+
 st.markdown("---")
 
 # 1. KPIs Section
 st.subheader("Real-Time Fleet Status")
 col1, col2, col3, col4, col5 = st.columns(5)
-
-# Fetch latest status using direct delta path queries
-silver_df = fetch_silver_df(spark, lakehouse.path_silver)
-gold_df = fetch_gold_df(spark, lakehouse.path_gold)
 
 # Render metrics and map if data is available
 if not silver_df.empty:
