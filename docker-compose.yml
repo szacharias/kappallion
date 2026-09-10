@@ -113,6 +113,11 @@ services:
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TOPIC=cold-chain-telemetry
+    volumes:
+      - ./docker/simulator/payload_simulator.py:/app/payload_simulator.py
+      - ./config:/app/config
+      - ./tests:/app/tests
+      - ./pyproject.toml:/app/pyproject.toml
     depends_on:
       kafka:
         condition: service_healthy

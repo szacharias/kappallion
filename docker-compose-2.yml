@@ -100,6 +100,8 @@ services:
     volumes:
       - ./docker/simulator/payload_simulator.py:/app/payload_simulator.py
       - ./config:/app/config
+      - ./tests:/app/tests
+      - ./pyproject.toml:/app/pyproject.toml
     deploy:
       resources:
         limits:

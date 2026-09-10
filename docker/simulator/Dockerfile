@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install dependencies
-RUN pip install --no-cache-dir kafka-python-ng
+RUN pip install --no-cache-dir kafka-python-ng pytest
 
 # Copy source code
 COPY payload_simulator.py .
