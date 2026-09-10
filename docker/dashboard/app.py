@@ -58,11 +58,14 @@ try:
     spark_connected = True
     
     # Register temp views dynamically if the paths exist
-    for name, path in [("bronze", lakehouse.path_bronze), ("silver", lakehouse.path_silver), ("gold", lakehouse.path_gold)]:
-        try:
-            spark.read.format("delta").load(path).createOrReplaceTempView(name)
-        except Exception:
-            pass
+    def register_views():
+        for name, path in [("bronze", lakehouse.path_bronze), ("silver", lakehouse.path_silver), ("gold", lakehouse.path_gold)]:
+            try:
+                spark.read.format("delta").load(path).createOrReplaceTempView(name)
+            except Exception as ex:
+                print(f"Initial view '{name}' skipped: {ex}", flush=True)
+
+    register_views()
 except Exception as e:
     spark_connected = False
     spark_error = e
@@ -71,61 +74,67 @@ except Exception as e:
 st.sidebar.title("❄️ Cold-Chain Lakehouse")
 st.sidebar.markdown("This dashboard queries the **Gold** and **Silver** tables in the Delta Lake on MinIO.")
 
-refresh_rate = st.sidebar.slider("Refresh Rate (seconds)", min_value=2, max_value=30, value=5)
-st.sidebar.caption("💡 Dynamic temporary views (`bronze`, `silver`, `gold`) are automatically registered for easy SQL querying.")
-auto_refresh = st.sidebar.checkbox("Auto Refresh Data", value=True)
+auto_refresh = st.sidebar.checkbox("Auto Refresh Data", value=False)
+refresh_rate = st.sidebar.slider("Refresh Interval (seconds)", min_value=3, max_value=60, value=10, disabled=not auto_refresh)
+st.sidebar.caption("💡 Page is static by default to conserve memory & CPU. Click Refresh to fetch latest records.")
+
+if st.sidebar.button("🔄 Refresh Data Now", type="primary", use_container_width=True):
+    st.cache_data.clear()
+    try:
+        register_views()
+    except Exception:
+        pass
+    st.rerun()
+
+time_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+st.sidebar.caption(f"Last fetched: `{time_now}`")
 
 if not spark_connected:
     st.error(f"Failed to connect to Spark. Error: {spark_error}")
     st.stop()
 
-# Auto refresh logic
-if auto_refresh:
-    time_delta = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    st.sidebar.caption(f"Last updated: {time_delta}")
-    st.sidebar.button("Force Refresh")
+# Cached data loaders
+@st.cache_data(ttl=60)
+def fetch_silver_df(_spark, path):
+    try:
+        return _spark.sql(f"SELECT * FROM delta.`{path}` ORDER BY Timestamp DESC LIMIT 500").toPandas()
+    except Exception as ex:
+        print(f"Silver table fetch error: {ex}", flush=True)
+        return pd.DataFrame()
 
-# Helper to refresh temp views and invalidate cached file metadata
-def refresh_views():
-    for name, path in [("bronze", lakehouse.path_bronze), ("silver", lakehouse.path_silver), ("gold", lakehouse.path_gold)]:
-        # Attempt to register if missing, otherwise refresh it
-        if not spark.catalog.tableExists(name):
-            try:
-                spark.read.format("delta").load(path).createOrReplaceTempView(name)
-            except Exception:
-                pass
-        else:
-            try:
-                spark.catalog.refreshTable(name)
-            except Exception:
-                pass
-
-# Run initial view refresh
-refresh_views()
+@st.cache_data(ttl=60)
+def fetch_gold_df(_spark, path):
+    try:
+        return _spark.sql(f"SELECT * FROM delta.`{path}` ORDER BY Window_End DESC LIMIT 100").toPandas()
+    except Exception as ex:
+        print(f"Gold table fetch error: {ex}", flush=True)
+        return pd.DataFrame()
 
 # Main UI Header
-st.title("Cold-Chain IoT Streaming Lakehouse Dashboard")
+header_col1, header_col2 = st.columns([4, 1])
+with header_col1:
+    st.title("Cold-Chain IoT Streaming Lakehouse Dashboard")
+with header_col2:
+    st.write("")
+    if st.button("🔄 Refresh Data", key="header_refresh", type="primary"):
+        st.cache_data.clear()
+        try:
+            register_views()
+        except Exception:
+            pass
+        st.rerun()
+
 st.markdown("---")
 
 # 1. KPIs Section
 st.subheader("Real-Time Fleet Status")
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
-# Fetch latest status from Silver Table view
-try:
-    silver_df = spark.sql("SELECT * FROM silver ORDER BY Timestamp DESC LIMIT 100").toPandas()
-except Exception as e:
-    silver_df = pd.DataFrame()
-    st.warning(f"Waiting for Silver Delta table data... ({e})")
+# Fetch latest status using direct delta path queries
+silver_df = fetch_silver_df(spark, lakehouse.path_silver)
+gold_df = fetch_gold_df(spark, lakehouse.path_gold)
 
-# Fetch status from Gold Table view
-try:
-    gold_df = spark.sql("SELECT * FROM gold ORDER BY Window_End DESC LIMIT 100").toPandas()
-except Exception as e:
-    gold_df = pd.DataFrame()
-    st.warning(f"Waiting for Gold Delta table data... ({e})")
-
-# Render metrics if data is available
+# Render metrics and map if data is available
 if not silver_df.empty:
     total_events = len(silver_df)
     latest_per_vehicle = silver_df.sort_values("Timestamp").groupby("Vehicle_ID").last().reset_index()
@@ -138,6 +147,26 @@ if not silver_df.empty:
     ]
     
     num_anomalies = len(anomalies_active)
+    
+    # Active condensation risks (T_cargo - T_dew < 2.0C)
+    condensation_active = latest_per_vehicle[latest_per_vehicle["Condensation_Risk"] == True]
+    num_condensation_risks = len(condensation_active)
+    
+    # Trigger popup alerts for active anomalies
+    for idx, alert in anomalies_active.iterrows():
+        st.toast(
+            f"🚨 **Anomaly Alert**: {alert['Vehicle_ID']} "
+            f"(Temp: {alert['Cargo_Temp']}°C, Door: {alert['Door_Status']}, Vibration: {alert['Vibration']}G)",
+            icon="⚠️"
+        )
+        
+    # Trigger popup alerts for condensation risks
+    for idx, alert in condensation_active.iterrows():
+        st.toast(
+            f"💧 **Condensation Warning**: {alert['Vehicle_ID']} "
+            f"(Temp: {alert['Cargo_Temp']}°C, Dew Point: {alert['Dew_Point']}°C, Humidity: {alert['Humidity']}%)",
+            icon="💧"
+        )
     
     with col1:
         st.markdown(f"""
@@ -161,6 +190,13 @@ if not silver_df.empty:
         </div>
         """, unsafe_allow_html=True)
     with col4:
+        st.markdown(f"""
+        <div class="stCard">
+            <div class="metric-label">Active Condensation Risks</div>
+            <div class="metric-value" style="color: {'#3182ce' if num_condensation_risks > 0 else '#48bb78'}">{num_condensation_risks}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col5:
         open_doors = len(latest_per_vehicle[latest_per_vehicle["Door_Status"] == "OPEN"])
         st.markdown(f"""
         <div class="stCard">
@@ -168,6 +204,31 @@ if not silver_df.empty:
             <div class="metric-value" style="color: {'#dd6b20' if open_doors > 0 else '#48bb78'}">{open_doors}</div>
         </div>
         """, unsafe_allow_html=True)
+
+    # 1.5. Live Fleet Tracking Map
+    st.markdown("---")
+    st.subheader("📍 Live Fleet Tracking Map")
+    
+    # Grab the last 10 coordinates per vehicle to show a path trace
+    map_df = silver_df.sort_values(["Vehicle_ID", "Timestamp"], ascending=[True, False])
+    map_df = map_df.groupby("Vehicle_ID").head(10).reset_index(drop=True)
+    map_df = map_df[["Latitude", "Longitude", "Vehicle_ID", "Cargo_Temp", "Door_Status", "Vibration", "Condensation_Risk"]].dropna()
+    if not map_df.empty:
+        map_df = map_df.rename(columns={"Latitude": "lat", "Longitude": "lon"})
+        
+        # Color code: Red for anomalies, Blue for Condensation Risk, Green for normal
+        def get_color(row):
+            if row["Cargo_Temp"] > 8.0 or row["Door_Status"] == "OPEN" or row["Vibration"] > 3.0:
+                return "#e53e3e"  # Red
+            if row["Condensation_Risk"] == True:
+                return "#3182ce"  # Blue/Cyan
+            return "#48bb78"  # Green
+            
+        map_df["color"] = map_df.apply(get_color, axis=1)
+        st.map(map_df, latitude="lat", longitude="lon", color="color", zoom=11, use_container_width=True)
+    else:
+        st.info("No coordinates available in Silver table yet.")
+
 else:
     st.info("No data received in Silver table yet. Please make sure the telemetry simulator and Spark streaming container are running.")
 
@@ -254,9 +315,9 @@ with tab3:
         templates = {
             "Custom Query (Blank)": "",
             "Total Events & Max Temp per Vehicle (Silver)": "SELECT Vehicle_ID, count(*) as total_events, max(Cargo_Temp) as max_cargo_temp FROM silver GROUP BY Vehicle_ID",
-            "Active Fleet Anomalies (Silver)": "SELECT * FROM silver WHERE Cargo_Temp > 8.0 OR Door_Status = 'OPEN' OR Vibration > 3.0 ORDER BY Timestamp DESC LIMIT 50",
-            "Latest Cleaned Events (Silver)": "SELECT Timestamp, Vehicle_ID, Ambient_Temp, Cargo_Temp, Door_Status FROM silver ORDER BY Timestamp DESC LIMIT 10",
-            "Gold Windowed Aggregates (Gold)": "SELECT Window_Start, Window_End, Vehicle_ID, Avg_Cargo_Temp, Anomaly_Flag FROM gold ORDER BY Window_End DESC LIMIT 20",
+            "Active Fleet Anomalies & Condensation Risks (Silver)": "SELECT Timestamp, Vehicle_ID, Cargo_Temp, Dew_Point, Humidity, Condensation_Risk FROM silver WHERE Cargo_Temp > 8.0 OR Door_Status = 'OPEN' OR Vibration > 3.0 OR Condensation_Risk = true ORDER BY Timestamp DESC LIMIT 50",
+            "Latest Cleaned Events (Silver)": "SELECT Timestamp, Vehicle_ID, Ambient_Temp, Cargo_Temp, Dew_Point, Condensation_Risk FROM silver ORDER BY Timestamp DESC LIMIT 10",
+            "Gold Windowed Aggregates (Gold)": "SELECT Window_Start, Window_End, Vehicle_ID, Avg_Cargo_Temp, Avg_Dew_Point, Condensation_Risk_Count FROM gold ORDER BY Window_End DESC LIMIT 20",
             "Raw Kafka Payloads (Bronze)": "SELECT timestamp, partition, offset, substring(CAST(value AS STRING), 1, 120) as payload_preview FROM bronze ORDER BY timestamp DESC LIMIT 10"
         }
         
@@ -284,7 +345,10 @@ with tab3:
                         import time as t_mod
                         t_start = t_mod.time()
                         # Refresh views dynamically to invalidate cached metadata files
-                        refresh_views()
+                        try:
+                            register_views()
+                        except Exception:
+                            pass
                         query_res = spark.sql(user_query).toPandas()
                         t_elapsed = t_mod.time() - t_start
                         

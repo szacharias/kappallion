@@ -42,7 +42,11 @@ CREATE TABLE IF NOT EXISTS {lakehouse.table_silver} (
     Humidity DOUBLE,
     Vibration DOUBLE,
     Door_Status STRING,
-    Temp_Delta DOUBLE
+    Temp_Delta DOUBLE,
+    Latitude DOUBLE,
+    Longitude DOUBLE,
+    Dew_Point DOUBLE,
+    Condensation_Risk BOOLEAN
 ) USING delta
 PARTITIONED BY (Vehicle_ID)
 LOCATION '{lakehouse.path_silver}'
@@ -59,7 +63,9 @@ CREATE TABLE IF NOT EXISTS {lakehouse.table_gold} (
     Avg_Ambient_Temp DOUBLE,
     Max_Vibration DOUBLE,
     Door_Open_Count LONG,
-    Anomaly_Flag BOOLEAN
+    Anomaly_Flag BOOLEAN,
+    Avg_Dew_Point DOUBLE,
+    Condensation_Risk_Count LONG
 ) USING delta
 LOCATION '{lakehouse.path_gold}'
 """)
