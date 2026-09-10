@@ -6,6 +6,12 @@ Presentation component rendering real-time KPI metrics and active anomaly alerts
 import pandas as pd
 import streamlit as st
 
+from domain.anomaly_rules import (
+    CRITICAL_CARGO_TEMP_C,
+    CRITICAL_VIBRATION_G,
+    DOOR_OPEN_STATUS,
+)
+
 
 def render_fleet_kpis(silver_df: pd.DataFrame, gold_df: pd.DataFrame):
     """Render real-time fleet overview KPI metrics cards and toast notifications."""
@@ -25,9 +31,9 @@ def render_fleet_kpis(silver_df: pd.DataFrame, gold_df: pd.DataFrame):
     avg_cargo_temp = latest_per_vehicle["Cargo_Temp"].mean()
 
     anomalies_active = latest_per_vehicle[
-        (latest_per_vehicle["Cargo_Temp"] > 8.0)
-        | (latest_per_vehicle["Door_Status"] == "OPEN")
-        | (latest_per_vehicle["Vibration"] > 3.0)
+        (latest_per_vehicle["Cargo_Temp"] > CRITICAL_CARGO_TEMP_C)
+        | (latest_per_vehicle["Door_Status"] == DOOR_OPEN_STATUS)
+        | (latest_per_vehicle["Vibration"] > CRITICAL_VIBRATION_G)
     ]
     num_anomalies = len(anomalies_active)
 
