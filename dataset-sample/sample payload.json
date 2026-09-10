@@ -1,0 +1,18 @@
+{
+    "eventId": "123e4567-e89b-12d3-a456-426614174000",
+    "vehicleId": "TRK-CHI-0854",
+    "timestamp": "2026-06-20T22:15:30Z",
+    "routeContext": {
+        "origin": "Warehouse-Chicago-West",
+        "destination": "Hub-Naperville",
+        "latitude": 41.7912,
+        "longitude": -87.8421
+    },
+    "telemetry": {
+        "ambientTempC": 26.5,
+        "cargoContainerTempC": 3.2,
+        "relativeHumidityPct": 55.4,
+        "vibrationG": 0.04,
+        "doorStatus": "CLOSED"
+    }
+}

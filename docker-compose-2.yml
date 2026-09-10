@@ -1,23 +1,18 @@
 version: "3.8"
 
 services:
-
-
-#  phase 1: kafka, kafdrop, minio
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: lakehouse-kafka
     ports:
       - "9092:9092"
-      - "29092:29092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_LISTENERS: 'INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093'
-      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka:9092,EXTERNAL://localhost:29092'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -25,23 +20,16 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_JVM_PERFORMANCE_OPTS: "-Xms256m -Xmx512m"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     healthcheck:
       test: [ "CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list" ]
       interval: 5s
       timeout: 5s
       retries: 10
-
-  kafdrop:
-    image: obsidiandynamics/kafdrop:latest
-    container_name: lakehouse-kafdrop
-    ports:
-      - "9010:9000"
-    environment:
-      KAFKA_BROKERCONNECT: "kafka:9092"
-      JVM_OPTS: "-Xms32M -Xmx64M"
-    depends_on:
-      kafka:
-        condition: service_healthy
 
   minio:
     image: minio/minio:latest
@@ -58,7 +46,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-# phase 2, minio init for buckets and policies
+
   minio-init:
     image: minio/mc:latest
     container_name: lakehouse-minio-init
@@ -66,18 +54,8 @@ services:
       minio:
         condition: service_healthy
     entrypoint: >
-      /bin/sh -c "
-      /usr/bin/mc alias set myminio http://minio:9000 admin password;
-      /usr/bin/mc mb -p myminio/warehouse;
-      /usr/bin/mc mb -p myminio/lakehouse;
-      /usr/bin/mc policy set public myminio/warehouse;
-      /usr/bin/mc policy set public myminio/lakehouse;
-      exit 0;
-      "
-    # add a warehouse location for catching defaults that i might've missed 
-  
+      /bin/sh -c " /usr/bin/mc alias set myminio http://minio:9000 admin password; /usr/bin/mc mb -p myminio/warehouse; /usr/bin/mc mb -p myminio/lakehouse; /usr/bin/mc policy set public myminio/warehouse; /usr/bin/mc policy set public myminio/lakehouse; exit 0; "
 
-#  phase 3: spark streaming pipeline and telemetry simulator
   spark-delta:
     build:
       context: ./docker/spark
@@ -86,20 +64,26 @@ services:
       - SPARK_MODE=master
       - AWS_REGION=us-east-1
       - AWS_DEFAULT_REGION=us-east-1
+      - _JAVA_OPTIONS=-Xms512m -Xmx1024m
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
     volumes:
       - ./apps:/opt/spark/apps
       - ./config:/opt/spark/config
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+    # Run the streaming pipeline in the background and keep the container alive for commands
     command: >
       /bin/bash -c "
-      echo 'Starting PySpark streaming pipeline...' &&
+      echo 'Bootstrapping Delta Lake tables...';
+      /opt/spark/bin/spark-submit /opt/spark/apps/setup/bootstrap_lakehouse.py &&
+      echo 'Starting PySpark modular streaming pipeline...';
       ( /opt/spark/bin/spark-submit --master local[*] /opt/spark/apps/pipelines/streaming_pipeline.py || tail -f /dev/null )
       "
     depends_on:
       kafka:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
     healthcheck:
       test: [ "CMD-SHELL", "pgrep -f streaming_pipeline.py" ]
       interval: 10s
@@ -113,13 +97,17 @@ services:
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TOPIC=cold-chain-telemetry
+    volumes:
+      - ./docker/simulator/payload_simulator.py:/app/payload_simulator.py
+      - ./config:/app/config
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     depends_on:
       kafka:
         condition: service_healthy
 
-
-#  phase 4: streamlit dashboard
-#  
   dashboard:
     build:
       context: ./docker/dashboard
@@ -134,10 +122,16 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - SPARK_HOME=/opt/spark
       - PYTHONPATH=/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
+      - _JAVA_OPTIONS=-Xms256m -Xmx512m
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
     volumes:
       - ./apps:/app/apps
       - ./config:/app/config
       - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./docker/dashboard/app.py:/app/app.py
     depends_on:
       spark-delta:
         condition: service_healthy

@@ -9,12 +9,17 @@ from kafka import KafkaProducer
 import os
 
 class TruckSimulator:
-    def __init__(self, vehicle_id, origin, destination, start_lat, start_lon):
+    def __init__(self, vehicle_id, origin, destination, start_lat, start_lon, dest_lat, dest_lon):
         self.vehicle_id = vehicle_id
         self.origin = origin
         self.destination = destination
         self.lat = start_lat
         self.lon = start_lon
+        self.dest_lat = dest_lat
+        self.dest_lon = dest_lon
+        self.base_lat = start_lat
+        self.base_lon = start_lon
+        self.speed_factor = random.uniform(0.005, 0.009)  # Significantly larger travel distance per tick
         
         # Physical baselines
         self.ambient_temp = 25.0  # Summer ambient temp C
@@ -33,9 +38,18 @@ class TruckSimulator:
         # 1. Simulate micro-fluctuations in ambient temperature
         self.ambient_temp += random.normalvariate(0, 0.1)
         
-        # 2. Progress coordinates slightly toward destination (simulating a route)
-        self.lat += random.uniform(-0.001, 0.001)
-        self.lon += random.uniform(-0.001, 0.001)
+        # 2. Progress coordinates toward destination with larger travel distance
+        d_lat = self.dest_lat - self.lat
+        d_lon = self.dest_lon - self.lon
+        dist = (d_lat**2 + d_lon**2)**0.5
+        if dist > 0.005:
+            # Move visibly along the route towards destination
+            self.lat += (d_lat / dist) * self.speed_factor + random.uniform(-0.0003, 0.0003)
+            self.lon += (d_lon / dist) * self.speed_factor + random.uniform(-0.0003, 0.0003)
+        else:
+            # Turn around and return to base or reverse route
+            self.dest_lat, self.base_lat = self.base_lat, self.dest_lat
+            self.dest_lon, self.base_lon = self.base_lon, self.dest_lon
         
         # 3. Handle state mechanics and thermodynamic decay
         if self.state == "NORMAL":
@@ -95,6 +109,19 @@ class TruckSimulator:
                 "doorStatus": self.door_status
             }
         }
+
+def get_target_fleet_size(default_val):
+    cfg_file = os.environ.get("FLEET_CONFIG", "/app/config/pipeline.conf")
+    if os.path.exists(cfg_file):
+        try:
+            import configparser
+            cp = configparser.ConfigParser()
+            cp.read(cfg_file)
+            if cp.has_section("fleet") and cp.has_option("fleet", "num_trucks"):
+                return int(cp.get("fleet", "num_trucks"))
+        except Exception:
+            pass
+    return int(os.environ.get("NUM_TRUCKS", default_val))
 
 # Execution Block for local verification
 if __name__ == "__main__":
@@ -162,38 +189,30 @@ if __name__ == "__main__":
     base_lon = -87.6513405
     
     fleet = []
-    generated_ids = set()
 
-    chicagoland_cities = [
-        "Chicago",
-        "Aurora",
-        "Naperville",
-        "Joliet",
-        "Elgin",
-        "Waukegan",
-        "Schaumburg",
-        "Evanston",
-        "Arlington Heights",
-        "Bolingbrook"
-    ]
+    chicagoland_hubs = {
+        "Hub-Aurora": (41.7606, -88.3201),
+        "Hub-Naperville": (41.7508, -88.1535),
+        "Hub-Joliet": (41.5250, -88.0817),
+        "Hub-Elgin": (42.0354, -88.2826),
+        "Hub-Waukegan": (42.3636, -87.8448),
+        "Hub-Schaumburg": (42.0334, -88.0834),
+        "Hub-Evanston": (42.0451, -87.6877),
+        "Hub-Arlington Heights": (42.0884, -87.9806),
+        "Hub-Bolingbrook": (41.6986, -88.0684)
+    }
 
-    # non duplicate ids for vehicles
-    # method of deduplication could be refined, if fleet gets too large, this would definitely break or take too long to run. 
-    for i in range(args.num_trucks): 
-        while True:
-            random_id = random.randint(1000, 9999)
-            v_id = f"TRK-CHI-{random_id:04d}"
-            if v_id not in generated_ids:
-                generated_ids.add(v_id)
-                break
-
+    # Predictable, consistent vehicle IDs and distinct destination routes
+    hub_choices = list(chicagoland_hubs.keys())
+    target_trucks = get_target_fleet_size(args.num_trucks)
+    for i in range(target_trucks): 
+        v_id = f"TRK-CHI-{i+1:04d}"
         origin = "Base Warehouse"
-        dest = f"Hub-{random.choice(chicagoland_cities)}"
-        
-        # Append the new simulator instance using the exact base coordinates
-        fleet.append(TruckSimulator(v_id, origin, dest, base_lat, base_lon))
+        dest = hub_choices[i % len(hub_choices)]
+        dest_lat, dest_lon = chicagoland_hubs[dest]
+        fleet.append(TruckSimulator(v_id, origin, dest, base_lat, base_lon, dest_lat, dest_lon))
     
-    print(f"Simulator Started simulating {len(fleet)} trucks. Press Ctrl+C to stop.\n")
+    print(f"Simulator Started simulating {len(fleet)} trucks ({', '.join([t.vehicle_id for t in fleet])}). Press Ctrl+C to stop.\n")
     print(f"total time scheduled {args.total_time}s, time per epoch {args.time_per_epoch}s, and total rounds is {args.total_time/args.time_per_epoch}")
     print("Simulation starting in 3 seconds...")
     for i in range(3, 0, -1):
@@ -203,6 +222,16 @@ if __name__ == "__main__":
     elapsed_time = 0.0
     try:
         while elapsed_time < args.total_time:
+            # Check for dynamic fleet expansion from config or environment
+            current_target = get_target_fleet_size(args.num_trucks)
+            while len(fleet) < current_target:
+                new_idx = len(fleet)
+                new_vid = f"TRK-CHI-{new_idx+1:04d}"
+                new_dest = hub_choices[new_idx % len(hub_choices)]
+                n_dest_lat, n_dest_lon = chicagoland_hubs[new_dest]
+                fleet.append(TruckSimulator(new_vid, origin, new_dest, base_lat, base_lon, n_dest_lat, n_dest_lon))
+                print(f"🚨 Dynamically added truck to active fleet: {new_vid} (Route: {new_dest})", flush=True)
+
             for truck in fleet:
                 payload = truck.generate_payload()
                 print(json.dumps(payload, indent=2))
