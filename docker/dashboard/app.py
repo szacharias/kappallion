@@ -3,6 +3,8 @@ from pyspark.sql import SparkSession
 import pandas as pd
 import plotly.express as px
 import datetime
+import os
+import configparser
 
 # Page Configuration
 st.set_page_config(
@@ -235,6 +237,56 @@ with st.sidebar.expander("📜 Delta Commit History", expanded=False):
     else:
         st.info("No commit history.")
 
+with st.sidebar.expander("🚛 Fleet Manager (Add Trucks)", expanded=True):
+    cfg_file = "/app/config/pipeline.conf"
+    current_fleet_size = 5
+    if os.path.exists(cfg_file):
+        try:
+            cp = configparser.ConfigParser()
+            cp.read(cfg_file)
+            if cp.has_section("fleet") and cp.has_option("fleet", "num_trucks"):
+                current_fleet_size = int(cp.get("fleet", "num_trucks"))
+        except Exception:
+            pass
+
+    st.markdown(f"**Active Fleet Target:** `{current_fleet_size} Trucks`")
+    f_col1, f_col2 = st.columns(2)
+    with f_col1:
+        if st.button("➕ Add 1 Truck", key="btn_add_1", use_container_width=True):
+            new_size = current_fleet_size + 1
+            try:
+                cp = configparser.ConfigParser()
+                if os.path.exists(cfg_file):
+                    cp.read(cfg_file)
+                if not cp.has_section("fleet"):
+                    cp.add_section("fleet")
+                cp.set("fleet", "num_trucks", str(new_size))
+                with open(cfg_file, "w") as f:
+                    cp.write(f)
+                st.success(f"Added truck! Fleet is now {new_size}.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    with f_col2:
+        if st.button("➕ Add 3 Trucks", key="btn_add_3", use_container_width=True):
+            new_size = current_fleet_size + 3
+            try:
+                cp = configparser.ConfigParser()
+                if os.path.exists(cfg_file):
+                    cp.read(cfg_file)
+                if not cp.has_section("fleet"):
+                    cp.add_section("fleet")
+                cp.set("fleet", "num_trucks", str(new_size))
+                with open(cfg_file, "w") as f:
+                    cp.write(f)
+                st.success(f"Added 3 trucks! Fleet is now {new_size}.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    st.caption("Simulator reads pipeline.conf dynamically and injects new vehicles onto designated routes.")
+
 st.markdown("---")
 
 # 1. KPIs Section
@@ -315,29 +367,70 @@ if not silver_df.empty:
     # 1.5. Live Fleet Tracking Map
     st.markdown("---")
     st.subheader("📍 Live Fleet Tracking Map")
-    st.caption("🔴 Red = Anomaly (Temp > 8°C / Door Open / High Vibration) | 🔵 Blue = Condensation Risk | 🟢 Green = Normal")
-    
-    # Grab the last 15 coordinates per vehicle to show a clean route trace
+
+    # Distinct color palette for unique vehicle tracking
+    VEHICLE_PALETTE = [
+        {"name": "Cyan", "rgba": [0, 210, 255, 230], "hex": "#00d2ff"},
+        {"name": "Coral", "rgba": [255, 107, 107, 230], "hex": "#ff6b6b"},
+        {"name": "Emerald", "rgba": [46, 213, 115, 230], "hex": "#2ed573"},
+        {"name": "Purple", "rgba": [165, 94, 234, 230], "hex": "#a55eea"},
+        {"name": "Gold", "rgba": [254, 211, 48, 230], "hex": "#fed330"},
+        {"name": "Hot Pink", "rgba": [255, 75, 145, 230], "hex": "#ff4b91"},
+        {"name": "Teal", "rgba": [29, 209, 161, 230], "hex": "#1dd1a1"},
+        {"name": "Royal Blue", "rgba": [75, 123, 236, 230], "hex": "#4b7bec"},
+        {"name": "Tangerine", "rgba": [250, 130, 49, 230], "hex": "#fa8231"},
+        {"name": "Lime", "rgba": [38, 222, 129, 230], "hex": "#26de81"},
+    ]
+
+    def get_truck_color(v_id):
+        try:
+            num = int(v_id.split("-")[-1]) - 1
+        except Exception:
+            num = hash(v_id)
+        return VEHICLE_PALETTE[num % len(VEHICLE_PALETTE)]["rgba"]
+
+    def get_truck_hex(v_id):
+        try:
+            num = int(v_id.split("-")[-1]) - 1
+        except Exception:
+            num = hash(v_id)
+        return VEHICLE_PALETTE[num % len(VEHICLE_PALETTE)]["hex"]
+
+    # Active vehicle filter
+    available_trucks = sorted(silver_df["Vehicle_ID"].dropna().unique().tolist())
+    map_filter_col1, map_filter_col2 = st.columns([3, 1])
+    with map_filter_col1:
+        selected_trucks = st.multiselect(
+            "🚛 Vehicles to Display on Map:",
+            options=available_trucks,
+            default=available_trucks[:6] if len(available_trucks) > 6 else available_trucks
+        )
+    with map_filter_col2:
+        trail_length = st.slider("Route Trail Length", min_value=5, max_value=50, value=15)
+
+    # Render color badges for selected trucks
+    if selected_trucks:
+        legend_badges = "".join([
+            f'<span style="background-color: {get_truck_hex(v)}; color: #000; font-weight: bold; '
+            f'padding: 3px 8px; border-radius: 4px; margin-right: 8px; font-size: 13px;">{v}</span>'
+            for v in selected_trucks
+        ])
+        st.markdown(f"**Vehicle Colors:** {legend_badges}", unsafe_allow_html=True)
+
+    # Grab coordinates per vehicle
     map_df = silver_df.sort_values(["Vehicle_ID", "Timestamp"], ascending=[True, False])
-    map_df = map_df.groupby("Vehicle_ID").head(15).reset_index(drop=True)
+    if selected_trucks:
+        map_df = map_df[map_df["Vehicle_ID"].isin(selected_trucks)]
+    map_df = map_df.groupby("Vehicle_ID").head(trail_length).reset_index(drop=True)
     map_df = map_df[["Latitude", "Longitude", "Vehicle_ID", "Cargo_Temp", "Door_Status", "Vibration", "Condensation_Risk", "Timestamp"]].dropna()
+
     if not map_df.empty:
         map_df = map_df.rename(columns={"Latitude": "lat", "Longitude": "lon"})
         map_df["Timestamp"] = map_df["Timestamp"].astype(str)
-        
-        # Color code as RGBA array for Pydeck
-        def get_rgba_color(row):
-            if row["Cargo_Temp"] > 8.0 or row["Door_Status"] == "OPEN" or row["Vibration"] > 3.0:
-                return [229, 62, 62, 230]  # Red
-            if row["Condensation_Risk"] == True:
-                return [49, 130, 206, 230]  # Blue/Cyan
-            return [72, 187, 120, 230]  # Green
-            
-        map_df["color"] = map_df.apply(get_rgba_color, axis=1)
+        map_df["color"] = map_df["Vehicle_ID"].apply(get_truck_color)
         
         import pydeck as pdk
         
-        # Crisp, smaller dots with strict pixel boundaries
         point_layer = pdk.Layer(
             "ScatterplotLayer",
             data=map_df,
@@ -345,7 +438,7 @@ if not silver_df.empty:
             get_color="color",
             get_radius=200,
             radius_min_pixels=3,
-            radius_max_pixels=6,
+            radius_max_pixels=7,
             pickable=True,
             auto_highlight=True,
         )
@@ -353,7 +446,7 @@ if not silver_df.empty:
         view_state = pdk.ViewState(
             latitude=float(map_df["lat"].mean()),
             longitude=float(map_df["lon"].mean()),
-            zoom=9.5,
+            zoom=9.2,
             pitch=0,
         )
         
@@ -362,9 +455,9 @@ if not silver_df.empty:
                 layers=[point_layer],
                 initial_view_state=view_state,
                 tooltip={
-                    "html": "<b>{Vehicle_ID}</b><br/>"
+                    "html": "<b>Truck: {Vehicle_ID}</b><br/>"
                             "<b>Time:</b> {Timestamp}<br/>"
-                            "<b>Cargo:</b> {Cargo_Temp}°C<br/>"
+                            "<b>Cargo Temp:</b> {Cargo_Temp}°C<br/>"
                             "<b>Door:</b> {Door_Status}<br/>"
                             "<b>Vibration:</b> {Vibration}G",
                     "style": {"backgroundColor": "#1a202c", "color": "white", "fontSize": "12px"}
@@ -374,7 +467,7 @@ if not silver_df.empty:
             use_container_width=True
         )
     else:
-        st.info("No coordinates available in Silver table yet.")
+        st.info("No coordinates available for the selected vehicle(s).")
 
 else:
     st.info("No data received in Silver table yet. Please make sure the telemetry simulator and Spark streaming container are running.")

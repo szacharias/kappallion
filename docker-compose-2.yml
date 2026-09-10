@@ -99,6 +99,7 @@ services:
       - KAFKA_TOPIC=cold-chain-telemetry
     volumes:
       - ./docker/simulator/payload_simulator.py:/app/payload_simulator.py
+      - ./config:/app/config
     deploy:
       resources:
         limits:
