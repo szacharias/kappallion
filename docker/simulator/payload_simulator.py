@@ -9,12 +9,17 @@ from kafka import KafkaProducer
 import os
 
 class TruckSimulator:
-    def __init__(self, vehicle_id, origin, destination, start_lat, start_lon):
+    def __init__(self, vehicle_id, origin, destination, start_lat, start_lon, dest_lat, dest_lon):
         self.vehicle_id = vehicle_id
         self.origin = origin
         self.destination = destination
         self.lat = start_lat
         self.lon = start_lon
+        self.dest_lat = dest_lat
+        self.dest_lon = dest_lon
+        self.base_lat = start_lat
+        self.base_lon = start_lon
+        self.speed_factor = random.uniform(0.005, 0.009)  # Significantly larger travel distance per tick
         
         # Physical baselines
         self.ambient_temp = 25.0  # Summer ambient temp C
@@ -33,9 +38,18 @@ class TruckSimulator:
         # 1. Simulate micro-fluctuations in ambient temperature
         self.ambient_temp += random.normalvariate(0, 0.1)
         
-        # 2. Progress coordinates slightly toward destination (simulating a route)
-        self.lat += random.uniform(-0.001, 0.001)
-        self.lon += random.uniform(-0.001, 0.001)
+        # 2. Progress coordinates toward destination with larger travel distance
+        d_lat = self.dest_lat - self.lat
+        d_lon = self.dest_lon - self.lon
+        dist = (d_lat**2 + d_lon**2)**0.5
+        if dist > 0.005:
+            # Move visibly along the route towards destination
+            self.lat += (d_lat / dist) * self.speed_factor + random.uniform(-0.0003, 0.0003)
+            self.lon += (d_lon / dist) * self.speed_factor + random.uniform(-0.0003, 0.0003)
+        else:
+            # Turn around and return to base or reverse route
+            self.dest_lat, self.base_lat = self.base_lat, self.dest_lat
+            self.dest_lon, self.base_lon = self.base_lon, self.dest_lon
         
         # 3. Handle state mechanics and thermodynamic decay
         if self.state == "NORMAL":
@@ -164,21 +178,20 @@ if __name__ == "__main__":
     fleet = []
     generated_ids = set()
 
-    chicagoland_cities = [
-        "Chicago",
-        "Aurora",
-        "Naperville",
-        "Joliet",
-        "Elgin",
-        "Waukegan",
-        "Schaumburg",
-        "Evanston",
-        "Arlington Heights",
-        "Bolingbrook"
-    ]
+    chicagoland_hubs = {
+        "Hub-Aurora": (41.7606, -88.3201),
+        "Hub-Naperville": (41.7508, -88.1535),
+        "Hub-Joliet": (41.5250, -88.0817),
+        "Hub-Elgin": (42.0354, -88.2826),
+        "Hub-Waukegan": (42.3636, -87.8448),
+        "Hub-Schaumburg": (42.0334, -88.0834),
+        "Hub-Evanston": (42.0451, -87.6877),
+        "Hub-Arlington Heights": (42.0884, -87.9806),
+        "Hub-Bolingbrook": (41.6986, -88.0684)
+    }
 
-    # non duplicate ids for vehicles
-    # method of deduplication could be refined, if fleet gets too large, this would definitely break or take too long to run. 
+    # Non-duplicate IDs and distinct destination routes for vehicles
+    hub_choices = list(chicagoland_hubs.keys())
     for i in range(args.num_trucks): 
         while True:
             random_id = random.randint(1000, 9999)
@@ -188,10 +201,11 @@ if __name__ == "__main__":
                 break
 
         origin = "Base Warehouse"
-        dest = f"Hub-{random.choice(chicagoland_cities)}"
+        dest = hub_choices[i % len(hub_choices)]
+        dest_lat, dest_lon = chicagoland_hubs[dest]
         
-        # Append the new simulator instance using the exact base coordinates
-        fleet.append(TruckSimulator(v_id, origin, dest, base_lat, base_lon))
+        # Append simulator instance with distinct origin & destination coordinates
+        fleet.append(TruckSimulator(v_id, origin, dest, base_lat, base_lon, dest_lat, dest_lon))
     
     print(f"Simulator Started simulating {len(fleet)} trucks. Press Ctrl+C to stop.\n")
     print(f"total time scheduled {args.total_time}s, time per epoch {args.time_per_epoch}s, and total rounds is {args.total_time/args.time_per_epoch}")

@@ -315,24 +315,64 @@ if not silver_df.empty:
     # 1.5. Live Fleet Tracking Map
     st.markdown("---")
     st.subheader("📍 Live Fleet Tracking Map")
+    st.caption("🔴 Red = Anomaly (Temp > 8°C / Door Open / High Vibration) | 🔵 Blue = Condensation Risk | 🟢 Green = Normal")
     
-    # Grab the last 10 coordinates per vehicle to show a path trace
+    # Grab the last 15 coordinates per vehicle to show a clean route trace
     map_df = silver_df.sort_values(["Vehicle_ID", "Timestamp"], ascending=[True, False])
-    map_df = map_df.groupby("Vehicle_ID").head(10).reset_index(drop=True)
-    map_df = map_df[["Latitude", "Longitude", "Vehicle_ID", "Cargo_Temp", "Door_Status", "Vibration", "Condensation_Risk"]].dropna()
+    map_df = map_df.groupby("Vehicle_ID").head(15).reset_index(drop=True)
+    map_df = map_df[["Latitude", "Longitude", "Vehicle_ID", "Cargo_Temp", "Door_Status", "Vibration", "Condensation_Risk", "Timestamp"]].dropna()
     if not map_df.empty:
         map_df = map_df.rename(columns={"Latitude": "lat", "Longitude": "lon"})
+        map_df["Timestamp"] = map_df["Timestamp"].astype(str)
         
-        # Color code: Red for anomalies, Blue for Condensation Risk, Green for normal
-        def get_color(row):
+        # Color code as RGBA array for Pydeck
+        def get_rgba_color(row):
             if row["Cargo_Temp"] > 8.0 or row["Door_Status"] == "OPEN" or row["Vibration"] > 3.0:
-                return "#e53e3e"  # Red
+                return [229, 62, 62, 230]  # Red
             if row["Condensation_Risk"] == True:
-                return "#3182ce"  # Blue/Cyan
-            return "#48bb78"  # Green
+                return [49, 130, 206, 230]  # Blue/Cyan
+            return [72, 187, 120, 230]  # Green
             
-        map_df["color"] = map_df.apply(get_color, axis=1)
-        st.map(map_df, latitude="lat", longitude="lon", color="color", zoom=11, use_container_width=True)
+        map_df["color"] = map_df.apply(get_rgba_color, axis=1)
+        
+        import pydeck as pdk
+        
+        # Crisp, smaller dots with strict pixel boundaries
+        point_layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=map_df,
+            get_position=["lon", "lat"],
+            get_color="color",
+            get_radius=200,
+            radius_min_pixels=3,
+            radius_max_pixels=6,
+            pickable=True,
+            auto_highlight=True,
+        )
+        
+        view_state = pdk.ViewState(
+            latitude=float(map_df["lat"].mean()),
+            longitude=float(map_df["lon"].mean()),
+            zoom=9.5,
+            pitch=0,
+        )
+        
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[point_layer],
+                initial_view_state=view_state,
+                tooltip={
+                    "html": "<b>{Vehicle_ID}</b><br/>"
+                            "<b>Time:</b> {Timestamp}<br/>"
+                            "<b>Cargo:</b> {Cargo_Temp}°C<br/>"
+                            "<b>Door:</b> {Door_Status}<br/>"
+                            "<b>Vibration:</b> {Vibration}G",
+                    "style": {"backgroundColor": "#1a202c", "color": "white", "fontSize": "12px"}
+                },
+                map_style=None
+            ),
+            use_container_width=True
+        )
     else:
         st.info("No coordinates available in Silver table yet.")
 
