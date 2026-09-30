@@ -20,6 +20,7 @@ from docker_flow.flow_service import (
     DEFAULT_COMPOSE_FILE,
     FALLBACK_COMPOSE_FILE,
     build_stack,
+    check_docker_cli,
     check_docker_daemon,
     down_unified_flow,
     get_unified_status,
@@ -53,22 +54,29 @@ class TestDockerFlowService:
         assert os.path.basename(resolved) in [DEFAULT_COMPOSE_FILE, FALLBACK_COMPOSE_FILE]
 
     @patch("subprocess.run")
-    def test_check_docker_daemon_online(self, mock_run):
-        """Returns True when docker info succeeds with returncode 0."""
+    def test_check_docker_cli_available(self, mock_run):
+        """Returns True when docker --version succeeds with returncode 0."""
         # Arrange
-        mock_run.return_value = MagicMock(returncode=0, stdout="24.0.5")
+        mock_run.return_value = MagicMock(returncode=0, stdout="Docker version 29.1.3")
 
         # Act & Assert
+        assert check_docker_cli() is True
         assert check_docker_daemon() is True
-        mock_run.assert_called_once()
+        mock_run.assert_called_with(
+            ["docker", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
 
     @patch("subprocess.run")
-    def test_check_docker_daemon_offline_returns_false(self, mock_run):
-        """Returns False cleanly when docker daemon is unreachable or raises error."""
+    def test_check_docker_cli_missing_returns_false(self, mock_run):
+        """Returns False cleanly when docker CLI is not found or raises error."""
         # Arrange
-        mock_run.side_effect = subprocess.SubprocessError("Daemon down")
+        mock_run.side_effect = FileNotFoundError("docker not found")
 
         # Act & Assert
+        assert check_docker_cli() is False
         assert check_docker_daemon() is False
 
     @patch("subprocess.run")

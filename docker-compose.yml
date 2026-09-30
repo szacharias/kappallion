@@ -1,6 +1,5 @@
-version: "3.8"
-
 services:
+
 
 
 #  phase 1: kafka, kafdrop, minio

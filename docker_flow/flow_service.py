@@ -47,11 +47,11 @@ def resolve_compose_file(custom_path: Optional[str] = None) -> str:
     return os.path.join(repo_root, FALLBACK_COMPOSE_FILE)
 
 
-def check_docker_daemon() -> bool:
-    """Pre-flight check verifying Docker Desktop daemon is responding."""
+def check_docker_cli() -> bool:
+    """Verify that the 'docker' command is available and executable in the CLI."""
     try:
         res = subprocess.run(
-            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            ["docker", "--version"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -62,14 +62,18 @@ def check_docker_daemon() -> bool:
         pass
 
     print("\n" + "=" * 65)
-    print("❌ ERROR: Docker daemon is not running!")
+    print("❌ ERROR: 'docker' command is not available in CLI / PATH!")
     print("=" * 65)
     print("Troubleshooting Steps:")
-    print("  1. Please launch 'Docker Desktop' from your Start menu or taskbar.")
-    print("  2. Wait until Docker Desktop indicates 'Engine running'.")
+    print("  1. Verify Docker CLI is installed.")
+    print("  2. Ensure the 'docker' executable is present in your system PATH.")
     print("  3. Re-run this flow script.")
     print("=" * 65 + "\n")
     return False
+
+
+# Backward compatibility alias
+check_docker_daemon = check_docker_cli
 
 
 def run_command(cmd: List[str], cwd: Optional[str] = None) -> subprocess.CompletedProcess:

@@ -6,6 +6,7 @@ Manages the entire stack as one cohesive, production-ready service.
 
 from .flow_service import (
     build_stack,
+    check_docker_cli,
     check_docker_daemon,
     down_unified_flow,
     get_unified_status,
@@ -16,6 +17,7 @@ from .flow_service import (
 )
 
 __all__ = [
+    "check_docker_cli",
     "check_docker_daemon",
     "build_stack",
     "start_unified_flow",
@@ -25,3 +27,4 @@ __all__ = [
     "down_unified_flow",
     "get_unified_status",
 ]
+
