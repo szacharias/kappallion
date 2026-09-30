@@ -19,11 +19,11 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
-      KAFKA_JVM_PERFORMANCE_OPTS: "-Xms256m -Xmx512m"
+      KAFKA_JVM_PERFORMANCE_OPTS: "${KAFKA_JVM_OPTS:--Xms128m -Xmx256m}"
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: ${KAFKA_MEM_LIMIT:-384M}
     healthcheck:
       test: [ "CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list" ]
       interval: 5s
@@ -40,6 +40,10 @@ services:
       - MINIO_ROOT_USER=admin
       - MINIO_ROOT_PASSWORD=password
     command: server /data --console-address ":9001"
+    deploy:
+      resources:
+        limits:
+          memory: ${MINIO_MEM_LIMIT:-384M}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 5s
@@ -63,11 +67,11 @@ services:
       - SPARK_MODE=master
       - AWS_REGION=us-east-1
       - AWS_DEFAULT_REGION=us-east-1
-      - _JAVA_OPTIONS=-Xms512m -Xmx1024m
+      - _JAVA_OPTIONS=${SPARK_JAVA_OPTS:--Xms256m -Xmx768m}
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: ${SPARK_MEM_LIMIT:-1024M}
     volumes:
       - ./apps:/opt/spark/apps
       - ./config:/opt/spark/config
@@ -78,7 +82,7 @@ services:
       echo 'Bootstrapping Delta Lake tables...';
       /opt/spark/bin/spark-submit /opt/spark/apps/setup/bootstrap_lakehouse.py &&
       echo 'Starting PySpark modular streaming pipeline...';
-      ( /opt/spark/bin/spark-submit --master local[*] /opt/spark/apps/pipelines/streaming_pipeline.py || tail -f /dev/null )
+      ( /opt/spark/bin/spark-submit --master $${SPARK_MASTER:-local[2]} /opt/spark/apps/pipelines/streaming_pipeline.py || tail -f /dev/null )
       "
     depends_on:
       kafka:
@@ -105,7 +109,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: ${SIMULATOR_MEM_LIMIT:-192M}
     depends_on:
       kafka:
         condition: service_healthy
@@ -124,11 +128,11 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - SPARK_HOME=/opt/spark
       - PYTHONPATH=/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip:/app
-      - _JAVA_OPTIONS=-Xms256m -Xmx512m
+      - _JAVA_OPTIONS=${DASHBOARD_JAVA_OPTS:--Xms128m -Xmx256m}
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: ${DASHBOARD_MEM_LIMIT:-512M}
     volumes:
       - ./apps:/app/apps
       - ./config:/app/config
@@ -137,3 +141,4 @@ services:
     depends_on:
       spark-delta:
         condition: service_healthy
+

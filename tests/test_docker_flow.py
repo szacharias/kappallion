@@ -19,6 +19,9 @@ if _repo_root not in sys.path:
 from docker_flow.flow_service import (
     DEFAULT_COMPOSE_FILE,
     FALLBACK_COMPOSE_FILE,
+    FULL_PROFILE,
+    LEAN_PROFILE,
+    ResourceProfile,
     build_stack,
     check_docker_cli,
     check_docker_daemon,
@@ -35,6 +38,20 @@ from docker_flow.flow_service import (
 @pytest.mark.unit
 class TestDockerFlowService:
     """Unit test suite for flow_service orchestration logic."""
+
+    def test_resource_profile_properties(self):
+        """ResourceProfile properly converts parameters into Docker environment variables."""
+        lean_env = LEAN_PROFILE.to_env()
+        assert lean_env["SPARK_MASTER"] == "local[2]"
+        assert lean_env["SPARK_MEM_LIMIT"] == "1024M"
+        assert lean_env["KAFKA_MEM_LIMIT"] == "384M"
+        assert lean_env["MINIO_MEM_LIMIT"] == "384M"
+
+        full_env = FULL_PROFILE.to_env()
+        assert full_env["SPARK_MASTER"] == "local[*]"
+        assert full_env["SPARK_MEM_LIMIT"] == "1536M"
+        assert full_env["KAFKA_MEM_LIMIT"] == "768M"
+        assert full_env["MINIO_MEM_LIMIT"] == "1024M"
 
     def test_resolve_compose_file_custom_existing(self, tmp_path):
         """Custom compose file path is preferred if it exists."""
@@ -95,30 +112,30 @@ class TestDockerFlowService:
         assert cmd[:2] == ["docker", "compose"]
         assert "build" in cmd
 
-    @patch("docker_flow.flow_service.check_docker_daemon", return_value=False)
-    def test_start_unified_flow_aborts_when_daemon_offline(self, mock_daemon):
-        """start_unified_flow aborts immediately without subprocess calls when daemon is offline."""
+    @patch("docker_flow.flow_service.check_docker_cli", return_value=False)
+    def test_start_unified_flow_aborts_when_daemon_offline(self, mock_cli):
+        """start_unified_flow aborts immediately without subprocess calls when docker is missing."""
         assert start_unified_flow() is False
 
-    @patch("docker_flow.flow_service.check_docker_daemon", return_value=True)
+    @patch("docker_flow.flow_service.check_docker_cli", return_value=True)
     @patch("docker_flow.flow_service.build_stack", return_value=True)
     @patch("docker_flow.flow_service.poll_container_health", return_value=True)
     @patch("docker_flow.flow_service.init_minio_buckets", return_value=True)
     @patch("subprocess.run")
-    def test_start_unified_flow_success(
+    def test_start_unified_flow_defaults_to_lean_profile(
         self,
         mock_run,
         mock_minio,
         mock_health,
         mock_build,
-        mock_daemon,
+        mock_cli,
     ):
-        """start_unified_flow orchestrates build, up -d, health checks, and returns True."""
+        """start_unified_flow defaults to Lean profile when full is not passed."""
         # Arrange
         mock_run.return_value = MagicMock(returncode=0)
 
         # Act
-        result = start_unified_flow(build=True, wait_ready=True)
+        result = start_unified_flow(build=True, wait_ready=True, full=False)
 
         # Assert
         assert result is True
@@ -126,18 +143,54 @@ class TestDockerFlowService:
         mock_minio.assert_called_once()
         assert mock_health.call_count >= 2
 
-    @patch("docker_flow.flow_service.check_docker_daemon", return_value=True)
+        # Verify environment passed to docker compose up has Lean settings
+        call_kwargs = mock_run.call_args[1]
+        env = call_kwargs.get("env", {})
+        assert env.get("SPARK_MASTER") == "local[2]"
+        assert env.get("SPARK_MEM_LIMIT") == "1024M"
+        assert env.get("KAFKA_MEM_LIMIT") == "384M"
+
+    @patch("docker_flow.flow_service.check_docker_cli", return_value=True)
+    @patch("docker_flow.flow_service.build_stack", return_value=True)
+    @patch("docker_flow.flow_service.poll_container_health", return_value=True)
+    @patch("docker_flow.flow_service.init_minio_buckets", return_value=True)
     @patch("subprocess.run")
-    def test_stop_unified_flow(self, mock_run, mock_daemon):
+    def test_start_unified_flow_with_full_profile(
+        self,
+        mock_run,
+        mock_minio,
+        mock_health,
+        mock_build,
+        mock_cli,
+    ):
+        """start_unified_flow uses Full performance profile when full=True."""
+        # Arrange
+        mock_run.return_value = MagicMock(returncode=0)
+
+        # Act
+        result = start_unified_flow(build=True, wait_ready=True, full=True)
+
+        # Assert
+        assert result is True
+        call_kwargs = mock_run.call_args[1]
+        env = call_kwargs.get("env", {})
+        assert env.get("SPARK_MASTER") == "local[*]"
+        assert env.get("SPARK_MEM_LIMIT") == "1536M"
+        assert env.get("KAFKA_MEM_LIMIT") == "768M"
+        assert env.get("MINIO_MEM_LIMIT") == "1024M"
+
+    @patch("docker_flow.flow_service.check_docker_cli", return_value=True)
+    @patch("subprocess.run")
+    def test_stop_unified_flow(self, mock_run, mock_cli):
         """stop_unified_flow executes docker compose stop."""
         mock_run.return_value = MagicMock(returncode=0)
         assert stop_unified_flow() is True
         cmd = mock_run.call_args[0][0]
         assert "stop" in cmd
 
-    @patch("docker_flow.flow_service.check_docker_daemon", return_value=True)
+    @patch("docker_flow.flow_service.check_docker_cli", return_value=True)
     @patch("subprocess.run")
-    def test_pause_and_unpause_unified_flow(self, mock_run, mock_daemon):
+    def test_pause_and_unpause_unified_flow(self, mock_run, mock_cli):
         """pause and unpause execute corresponding docker compose commands."""
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -147,17 +200,17 @@ class TestDockerFlowService:
         assert unpause_unified_flow() is True
         assert "unpause" in mock_run.call_args[0][0]
 
-    @patch("docker_flow.flow_service.check_docker_daemon", return_value=True)
+    @patch("docker_flow.flow_service.check_docker_cli", return_value=True)
     @patch("subprocess.run")
-    def test_down_unified_flow(self, mock_run, mock_daemon):
+    def test_down_unified_flow(self, mock_run, mock_cli):
         """down_unified_flow executes docker compose down."""
         mock_run.return_value = MagicMock(returncode=0)
         assert down_unified_flow() is True
         assert "down" in mock_run.call_args[0][0]
 
-    @patch("docker_flow.flow_service.check_docker_daemon", return_value=True)
+    @patch("docker_flow.flow_service.check_docker_cli", return_value=True)
     @patch("docker_flow.flow_service.run_command")
-    def test_get_unified_status_parses_json_lines(self, mock_cmd, mock_daemon):
+    def test_get_unified_status_parses_json_lines(self, mock_cmd, mock_cli):
         """get_unified_status parses JSON output from docker ps."""
         mock_cmd.return_value = MagicMock(
             stdout='{"Names": "lakehouse-dashboard", "State": "running", "Status": "Up 2 hours"}\n'

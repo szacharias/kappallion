@@ -29,14 +29,21 @@ def main() -> None:
         default=None,
         help="Custom path to docker-compose file.",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Launch in unrestricted performance mode (default is lean mode ~2.4GB max RAM).",
+    )
     args = parser.parse_args()
 
     success = start_unified_flow(
         build=not args.no_build,
         wait_ready=not args.no_wait,
         compose_file=args.compose_file,
+        full=args.full,
     )
     sys.exit(0 if success else 1)
+
 
 
 if __name__ == "__main__":

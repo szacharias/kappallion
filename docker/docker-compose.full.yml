@@ -1,0 +1,44 @@
+services:
+
+  kafka:
+    environment:
+      KAFKA_JVM_PERFORMANCE_OPTS: "-Xms256m -Xmx512m"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  minio:
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+
+  spark-delta:
+    environment:
+      - _JAVA_OPTIONS=-Xms512m -Xmx1024m
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    command: >
+      /bin/bash -c "
+      echo 'Bootstrapping Delta Lake tables...';
+      /opt/spark/bin/spark-submit /opt/spark/apps/setup/bootstrap_lakehouse.py &&
+      echo 'Starting PySpark modular streaming pipeline (Full multi-threaded master)...';
+      ( /opt/spark/bin/spark-submit --master local[*] /opt/spark/apps/pipelines/streaming_pipeline.py || tail -f /dev/null )
+      "
+
+  telemetry-simulator:
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  dashboard:
+    environment:
+      - _JAVA_OPTIONS=-Xms256m -Xmx512m
+    deploy:
+      resources:
+        limits:
+          memory: 1024M

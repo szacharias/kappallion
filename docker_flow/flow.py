@@ -29,6 +29,11 @@ def main() -> None:
     p_start.add_argument("--no-build", action="store_true", help="Skip image rebuild")
     p_start.add_argument("--no-wait", action="store_true", help="Skip readiness polling")
     p_start.add_argument("--compose-file", type=str, default=None, help="Custom compose file")
+    p_start.add_argument(
+        "--full",
+        action="store_true",
+        help="Launch in unrestricted performance mode (default is lean mode ~2.4GB max RAM).",
+    )
 
     # stop
     p_stop = subparsers.add_parser("stop", help="Gracefully stop all services (preserves data)")
@@ -61,7 +66,13 @@ def main() -> None:
         no_build = getattr(args, "no_build", False)
         no_wait = getattr(args, "no_wait", False)
         compose_file = getattr(args, "compose_file", None)
-        success = start_unified_flow(build=not no_build, wait_ready=not no_wait, compose_file=compose_file)
+        full = getattr(args, "full", False)
+        success = start_unified_flow(
+            build=not no_build,
+            wait_ready=not no_wait,
+            compose_file=compose_file,
+            full=full,
+        )
         sys.exit(0 if success else 1)
 
     if args.command == "stop":
