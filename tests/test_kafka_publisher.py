@@ -9,6 +9,10 @@ import sys
 from unittest.mock import MagicMock, patch
 import pytest
 
+# Ensure kafka module can be mocked even if not installed in host environment
+if "kafka" not in sys.modules:
+    sys.modules["kafka"] = MagicMock()
+
 _SIM_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docker", "simulator"))
 if _SIM_DIR not in sys.path:
     sys.path.insert(0, _SIM_DIR)
