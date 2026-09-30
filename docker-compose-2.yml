@@ -62,6 +62,7 @@ services:
   spark-delta:
     build:
       context: ./docker/spark
+    image: iceberg-spark-delta
     container_name: lakehouse-spark-delta
     ports:
       - "4040:4040"

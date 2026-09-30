@@ -6,9 +6,9 @@ Adheres strictly to GEMINI.md Clean Code guidelines and FIRST principles.
 """
 
 import os
-import subprocess
 import sys
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 # Add repo root to path for imports
@@ -16,12 +16,11 @@ _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from docker_flow.flow_service import (
+from docker_flow.flow_service import (  # noqa: E402
     DEFAULT_COMPOSE_FILE,
     FALLBACK_COMPOSE_FILE,
     FULL_PROFILE,
     LEAN_PROFILE,
-    ResourceProfile,
     build_stack,
     check_docker_cli,
     check_docker_daemon,
@@ -50,13 +49,12 @@ class TestDockerFlowService:
         assert lean_env["DASHBOARD_JAVA_OPTS"] == "-Xms256m -Xmx512m"
 
         full_env = FULL_PROFILE.to_env()
-        assert full_env["SPARK_MASTER"] == "local[*]"
+        assert full_env["SPARK_MASTER"] == "spark://spark-master:7077"
         assert full_env["SPARK_MEM_LIMIT"] == "1536M"
         assert full_env["KAFKA_MEM_LIMIT"] == "768M"
         assert full_env["MINIO_MEM_LIMIT"] == "1024M"
         assert full_env["DASHBOARD_MEM_LIMIT"] == "1536M"
         assert full_env["DASHBOARD_JAVA_OPTS"] == "-Xms512m -Xmx1024m"
-
 
     def test_resolve_compose_file_custom_existing(self, tmp_path):
         """Custom compose file path is preferred if it exists."""
@@ -74,6 +72,18 @@ class TestDockerFlowService:
         """Resolves to DEFAULT_COMPOSE_FILE or FALLBACK_COMPOSE_FILE in repo root."""
         resolved = resolve_compose_file()
         assert os.path.basename(resolved) in [DEFAULT_COMPOSE_FILE, FALLBACK_COMPOSE_FILE]
+
+    def test_resolve_compose_files_lean_and_full(self):
+        """Lean returns single base file; Full layers docker-compose.full.yml overlay."""
+        from docker_flow.flow_service import resolve_compose_files
+        lean_files = resolve_compose_files(full=False)
+        assert len(lean_files) == 1
+        assert os.path.basename(lean_files[0]) in [DEFAULT_COMPOSE_FILE, FALLBACK_COMPOSE_FILE]
+
+        full_files = resolve_compose_files(full=True)
+        assert len(full_files) == 2
+        assert os.path.basename(full_files[1]) == "docker-compose.full.yml"
+
 
     @patch("subprocess.run")
     def test_check_docker_cli_available(self, mock_run):
@@ -179,7 +189,7 @@ class TestDockerFlowService:
         assert result is True
         call_kwargs = mock_run.call_args[1]
         env = call_kwargs.get("env", {})
-        assert env.get("SPARK_MASTER") == "local[*]"
+        assert env.get("SPARK_MASTER") == "spark://spark-master:7077"
         assert env.get("SPARK_MEM_LIMIT") == "1536M"
         assert env.get("KAFKA_MEM_LIMIT") == "768M"
         assert env.get("MINIO_MEM_LIMIT") == "1024M"

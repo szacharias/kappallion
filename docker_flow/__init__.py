@@ -8,6 +8,8 @@ from .flow_service import (
     FULL_PROFILE,
     LEAN_PROFILE,
     ResourceProfile,
+    SPARK_MASTER_URL,
+    SPARK_UI_URL,
     build_stack,
     check_docker_cli,
     check_docker_daemon,
@@ -23,6 +25,8 @@ __all__ = [
     "ResourceProfile",
     "LEAN_PROFILE",
     "FULL_PROFILE",
+    "SPARK_MASTER_URL",
+    "SPARK_UI_URL",
     "check_docker_cli",
     "check_docker_daemon",
     "build_stack",
@@ -33,5 +37,6 @@ __all__ = [
     "down_unified_flow",
     "get_unified_status",
 ]
+
 
 

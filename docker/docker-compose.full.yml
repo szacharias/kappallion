@@ -1,5 +1,78 @@
 services:
 
+  spark-master:
+    image: iceberg-spark-delta
+    container_name: lakehouse-spark-master
+    environment:
+      - SPARK_MODE=master
+      - _JAVA_OPTIONS=-Xms256m -Xmx512m
+    ports:
+      - "8080:8080" # Spark Master Web UI (Master & Slaves/Workers)
+      - "7077:7077" # Spark Master RPC
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    volumes:
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+    command: >
+      /bin/bash -c "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --ip 0.0.0.0 --port 7077 --webui-port 8080"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8080 || exit 1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  spark-worker-1:
+    image: iceberg-spark-delta
+    container_name: lakehouse-spark-worker-1
+    environment:
+      - SPARK_MODE=worker
+      - _JAVA_OPTIONS=-Xms256m -Xmx768m
+    ports:
+      - "8081:8081" # Worker Web UI
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    volumes:
+      - ./apps:/opt/spark/apps
+      - ./config:/opt/spark/config
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+    command: >
+      /bin/bash -c "/opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --webui-port 8081"
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  spark-delta:
+    image: iceberg-spark-delta
+    ports:
+      - "4040:4040"
+    environment:
+      - SPARK_MODE=client
+      - AWS_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - _JAVA_OPTIONS=-Xms512m -Xmx1024m
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    command: >
+      /bin/bash -c "
+      echo 'Bootstrapping Delta Lake tables...';
+      /opt/spark/bin/spark-submit /opt/spark/apps/setup/bootstrap_lakehouse.py &&
+      echo 'Starting PySpark streaming pipeline on Standalone Cluster (spark://spark-master:7077)...';
+      ( /opt/spark/bin/spark-submit --master spark://spark-master:7077 /opt/spark/apps/pipelines/streaming_pipeline.py || tail -f /dev/null )
+      "
+    depends_on:
+      kafka:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+      spark-worker-1:
+        condition: service_started
+
   kafka:
     environment:
       KAFKA_JVM_PERFORMANCE_OPTS: "-Xms256m -Xmx512m"
@@ -13,23 +86,6 @@ services:
       resources:
         limits:
           memory: 1024M
-
-  spark-delta:
-    ports:
-      - "4040:4040"
-    environment:
-      - _JAVA_OPTIONS=-Xms512m -Xmx1024m
-    deploy:
-      resources:
-        limits:
-          memory: 1536M
-    command: >
-      /bin/bash -c "
-      echo 'Bootstrapping Delta Lake tables...';
-      /opt/spark/bin/spark-submit /opt/spark/apps/setup/bootstrap_lakehouse.py &&
-      echo 'Starting PySpark modular streaming pipeline (Full multi-threaded master)...';
-      ( /opt/spark/bin/spark-submit --master local[*] /opt/spark/apps/pipelines/streaming_pipeline.py || tail -f /dev/null )
-      "
 
   telemetry-simulator:
     deploy:
