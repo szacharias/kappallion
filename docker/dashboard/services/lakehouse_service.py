@@ -16,9 +16,10 @@ def init_spark_session():
     import sys
     sys.path.append("/app/apps/core")
     from lakehouse_spark_env import LakehouseSparkEnv
-    env = LakehouseSparkEnv("LakehouseDashboard", log_level="ERROR")
+    env = LakehouseSparkEnv("LakehouseDashboard", log_level="ERROR", enable_ui=False)
     register_delta_views(env.spark, env)
     return env
+
 
 
 def register_delta_views(spark, lakehouse_env):

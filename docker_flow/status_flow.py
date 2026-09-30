@@ -5,7 +5,8 @@ Displays the live health, operational state, and exposed ports of the unified La
 
 import argparse
 import sys
-from flow_service import KAFKA_PORT, MINIO_URL, STREAMLIT_URL, get_unified_status
+from flow_service import KAFKA_PORT, MINIO_URL, SPARK_UI_URL, STREAMLIT_URL, get_unified_status
+
 
 
 def main() -> None:
@@ -49,8 +50,10 @@ def main() -> None:
     print("=" * 80)
     print("Gateways:")
     print(f"  • Dashboard : {STREAMLIT_URL}")
+    print(f"  • Spark UI  : {SPARK_UI_URL}")
     print(f"  • MinIO S3  : {MINIO_URL}")
     print(f"  • Kafka     : localhost:{KAFKA_PORT}\n")
+
 
 
 if __name__ == "__main__":

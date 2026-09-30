@@ -35,6 +35,7 @@ DEFAULT_HEALTH_TIMEOUT_SEC: int = 40
 STREAMLIT_URL: str = "http://localhost:8501"
 MINIO_URL: str = "http://localhost:9001"
 KAFKA_PORT: int = 9092
+SPARK_UI_URL: str = "http://localhost:4040"
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class ResourceProfile:
 
 
 # Lean Profile (Default): Tailored for 16GB laptops (~2.4GB max RAM footprint)
+# Enforces Spark's minimum driver requirement (512m heap / 768M container limit)
 LEAN_PROFILE = ResourceProfile(
     name="LEAN (Limited Resource Profile - Default)",
     description="Optimized for 16GB developer laptops (~2.4GB max RAM ceiling, Spark local[2]).",
@@ -77,8 +79,8 @@ LEAN_PROFILE = ResourceProfile(
     kafka_jvm_opts="-Xms128m -Xmx256m",
     kafka_mem_limit="384M",
     minio_mem_limit="384M",
-    dashboard_java_opts="-Xms128m -Xmx256m",
-    dashboard_mem_limit="512M",
+    dashboard_java_opts="-Xms256m -Xmx512m",
+    dashboard_mem_limit="768M",
     simulator_mem_limit="192M",
 )
 
@@ -92,10 +94,11 @@ FULL_PROFILE = ResourceProfile(
     kafka_jvm_opts="-Xms256m -Xmx512m",
     kafka_mem_limit="768M",
     minio_mem_limit="1024M",
-    dashboard_java_opts="-Xms256m -Xmx512m",
-    dashboard_mem_limit="1024M",
+    dashboard_java_opts="-Xms512m -Xmx1024m",
+    dashboard_mem_limit="1536M",
     simulator_mem_limit="256M",
 )
+
 
 
 
@@ -231,6 +234,7 @@ def start_unified_flow(
     print("✅ UNIFIED COLD-CHAIN LAKEHOUSE PLATFORM IS RUNNING!")
     print("=" * 65)
     print(f"  ❄️  Streamlit Dashboard : {STREAMLIT_URL}")
+    print(f"  ⚡  Spark Web UI (Jobs) : {SPARK_UI_URL}")
     print(f"  🪣  MinIO Object Browser: {MINIO_URL} (User: admin / password)")
     print(f"  📡  Kafka Broker Host   : localhost:{KAFKA_PORT}")
     print(f"  ⚡  Resource Profile    : {'FULL (Performance)' if full else 'LEAN (Limited)'}")

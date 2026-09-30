@@ -3,7 +3,7 @@ import configparser
 from pyspark.sql import SparkSession
 
 class LakehouseSparkEnv:
-    def __init__(self, app_name: str, log_level: str = "WARN"):
+    def __init__(self, app_name: str, log_level: str = "WARN", enable_ui: bool = True):
         # 1. Resolve configuration paths with environment variable overrides
         fallback_config = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "config"))
         config_dir = os.environ.get("CONFIG_DIR", fallback_config)
@@ -18,9 +18,11 @@ class LakehouseSparkEnv:
         self.pipeline_cfg.read(pipeline_config_path)
         
         # 3. Initialize the SparkSession (auto-loads settings from spark-defaults.conf)
-        self.spark = SparkSession.builder \
-            .appName(app_name) \
-            .getOrCreate()
+        builder = SparkSession.builder.appName(app_name)
+        if not enable_ui:
+            builder = builder.config("spark.ui.enabled", "false")
+        builder = builder.config("spark.driver.memory", "512m")
+        self.spark = builder.getOrCreate()
             
         self.spark.sparkContext.setLogLevel(log_level)
         

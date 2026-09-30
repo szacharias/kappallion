@@ -46,12 +46,17 @@ class TestDockerFlowService:
         assert lean_env["SPARK_MEM_LIMIT"] == "1024M"
         assert lean_env["KAFKA_MEM_LIMIT"] == "384M"
         assert lean_env["MINIO_MEM_LIMIT"] == "384M"
+        assert lean_env["DASHBOARD_MEM_LIMIT"] == "768M"
+        assert lean_env["DASHBOARD_JAVA_OPTS"] == "-Xms256m -Xmx512m"
 
         full_env = FULL_PROFILE.to_env()
         assert full_env["SPARK_MASTER"] == "local[*]"
         assert full_env["SPARK_MEM_LIMIT"] == "1536M"
         assert full_env["KAFKA_MEM_LIMIT"] == "768M"
         assert full_env["MINIO_MEM_LIMIT"] == "1024M"
+        assert full_env["DASHBOARD_MEM_LIMIT"] == "1536M"
+        assert full_env["DASHBOARD_JAVA_OPTS"] == "-Xms512m -Xmx1024m"
+
 
     def test_resolve_compose_file_custom_existing(self, tmp_path):
         """Custom compose file path is preferred if it exists."""

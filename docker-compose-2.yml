@@ -63,6 +63,8 @@ services:
     build:
       context: ./docker/spark
     container_name: lakehouse-spark-delta
+    ports:
+      - "4040:4040"
     environment:
       - SPARK_MODE=master
       - AWS_REGION=us-east-1
@@ -128,11 +130,11 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - SPARK_HOME=/opt/spark
       - PYTHONPATH=/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip:/app
-      - _JAVA_OPTIONS=${DASHBOARD_JAVA_OPTS:--Xms128m -Xmx256m}
+      - _JAVA_OPTIONS=${DASHBOARD_JAVA_OPTS:--Xms256m -Xmx512m}
     deploy:
       resources:
         limits:
-          memory: ${DASHBOARD_MEM_LIMIT:-512M}
+          memory: ${DASHBOARD_MEM_LIMIT:-768M}
     volumes:
       - ./apps:/app/apps
       - ./config:/app/config
