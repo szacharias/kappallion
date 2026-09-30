@@ -5,7 +5,11 @@ Resumes execution of previously paused Lakehouse containers.
 
 import argparse
 import sys
-from flow_service import unpause_unified_flow
+
+try:
+    from docker_flow.flow_service import unpause_unified_flow
+except ImportError:
+    from flow_service import unpause_unified_flow
 
 
 def main() -> None:

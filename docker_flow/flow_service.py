@@ -160,7 +160,9 @@ def check_docker_cli() -> bool:
     print("Troubleshooting Steps:")
     print("  1. Verify Docker CLI is installed.")
     print("  2. Ensure the 'docker' executable is present in your system PATH.")
-    print("  3. Re-run this flow script.")
+    print("  3. On Linux, ensure the Docker daemon is active and your user is in the 'docker' group:")
+    print("     sudo systemctl start docker && sudo usermod -aG docker $USER")
+    print("  4. Re-run this flow script.")
     print("=" * 65 + "\n")
     return False
 

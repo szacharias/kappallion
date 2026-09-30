@@ -6,7 +6,11 @@ Builds images, provisions MinIO buckets, and brings up the entire streaming serv
 
 import argparse
 import sys
-from flow_service import start_unified_flow
+
+try:
+    from docker_flow.flow_service import start_unified_flow
+except ImportError:
+    from flow_service import start_unified_flow
 
 
 def main() -> None:

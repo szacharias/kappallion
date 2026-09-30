@@ -6,15 +6,27 @@ Allows running start, stop, pause, unpause, status, or build from a single comma
 
 import argparse
 import sys
-from flow_service import (
-    build_stack,
-    down_unified_flow,
-    pause_unified_flow,
-    start_unified_flow,
-    stop_unified_flow,
-    unpause_unified_flow,
-)
-from status_flow import main as status_main
+
+try:
+    from docker_flow.flow_service import (
+        build_stack,
+        down_unified_flow,
+        pause_unified_flow,
+        start_unified_flow,
+        stop_unified_flow,
+        unpause_unified_flow,
+    )
+    from docker_flow.status_flow import main as status_main
+except ImportError:
+    from flow_service import (
+        build_stack,
+        down_unified_flow,
+        pause_unified_flow,
+        start_unified_flow,
+        stop_unified_flow,
+        unpause_unified_flow,
+    )
+    from status_flow import main as status_main
 
 
 def main() -> None:

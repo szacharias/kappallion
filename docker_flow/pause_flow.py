@@ -5,7 +5,11 @@ Freezes execution of all Lakehouse containers (100% CPU savings) while preservin
 
 import argparse
 import sys
-from flow_service import pause_unified_flow
+
+try:
+    from docker_flow.flow_service import pause_unified_flow
+except ImportError:
+    from flow_service import pause_unified_flow
 
 
 def main() -> None:

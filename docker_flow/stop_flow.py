@@ -5,7 +5,11 @@ Gracefully shuts down the unified Lakehouse platform, preserving all Delta Lake 
 
 import argparse
 import sys
-from flow_service import stop_unified_flow
+
+try:
+    from docker_flow.flow_service import stop_unified_flow
+except ImportError:
+    from flow_service import stop_unified_flow
 
 
 def main() -> None:

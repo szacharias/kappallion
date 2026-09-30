@@ -7,9 +7,9 @@ Manages the entire stack as one cohesive, production-ready service.
 from .flow_service import (
     FULL_PROFILE,
     LEAN_PROFILE,
-    ResourceProfile,
     SPARK_MASTER_URL,
     SPARK_UI_URL,
+    ResourceProfile,
     build_stack,
     check_docker_cli,
     check_docker_daemon,
